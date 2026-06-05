@@ -25,6 +25,11 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
 
 ## Features
 
+> **Highlights:** chain requests with **captures + assertions**, reach private APIs
+> through an **SSH jump host**, inspect every call in the **request log**, see what's
+> in scope in the **variables inspector**, and go both ways with **cURL** — all
+> offline, in plain `.yon` files.
+
 - **Methods:** GET · POST · PUT · DELETE · PATCH · HEAD · OPTIONS — or type any custom verb
 - **Organize your requests:** group them into **folders** you can collapse to cut
   clutter, **drag & drop** to reorder or move between folders, and **filter** the
@@ -42,6 +47,20 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
   the URL, params, headers, body and auth. Mark a variable **secret** to keep its value
   out of committed files (stored in a gitignored `.env`); plus dynamic
   `{{$uuid}}` / `{{$timestamp}}`
+- **SSH jump host (tunnel):** give an environment an **SSH jump host** and Yon dials
+  every request *through* a live, in-process SSH tunnel — reach APIs only visible from
+  a bastion, with the request URL never rewritten. Key or password auth, host-key
+  **trust-on-first-use**, a live **Tunnels** view (Collection ▸ Tunnels…) and a footer
+  status dot; jump-host secrets stay in the gitignored `.env`
+- **Chain requests — captures & assertions:** **capture** a value from a response
+  (JSON path or header) into a `{{variable}}` the next request uses, and **assert** on
+  the response (status · JSON path · header · response time) — declarative, no
+  scripting. Pass/fail shows in the response's **Tests** tab
+- **Variables inspector:** a toggleable side panel listing every variable in scope —
+  environment, collection, and captured runtime values — as `KEY : VALUE`;
+  double-click a row to copy its value (secrets masked on screen)
+- **Per-request overrides:** override the global timeout, *Allow insecure TLS*, and
+  *Follow redirects* for a single request from its **Options** tab
 - **Body:** None · JSON (auto `Content-Type` + pretty) · XML (auto `Content-Type` + format) · Text
 - **Response in tabs — Body & Headers:** the body uses the full pane, with a **Pretty**
   (indented and syntax-coloured for JSON, XML and HTML) / **Raw** toggle and one-click
@@ -51,8 +70,12 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
   match counter, next/previous navigation, and Esc to close
 - **Pop-out window** (⤢): open a response in its own resizable window — drag-select
   and copy text, **Save Output As…** for the full body, or search with highlighting
-- **Copy as cURL:** turn any request into a ready-to-run `curl` command, with
-  `{{variables}}` resolved from the active environment
+- **cURL both ways:** **Copy as cURL** turns any request into a ready-to-run `curl`
+  command (a live tab, `{{variables}}` resolved); **New Request from cURL** does the
+  inverse — paste a `curl` command and Yon builds the request (method, URL, headers,
+  body, auth)
+- **Request log:** a combined, copyable log of every send across all tabs — **double-click
+  a row** to open a detail window with the full request and response (headers + body)
 - **Send / Cancel** any in-flight request — or press **Enter** in the URL bar to send
 - **Collections** saved as plain-JSON `.yon` files — one window per collection, one
   tab per request; **⌘S / Ctrl+S** to Save and **⌘⇧S / Ctrl+Shift+S** for Save As,
@@ -162,8 +185,9 @@ The core is UI-free and fully testable; Fyne lives only in the front end.
 
 ## Roadmap (post-v1)
 
-Environments & variables · request history · collection folders · import from
-OpenAPI and `.http` files · form-data & multipart bodies · pre-request scripts.
+Import from **OpenAPI** and `.http` files · **form-data & multipart** bodies ·
+**OAuth 2.0 / API-key** auth · pre-request & post-response **scripting** ·
+WebSocket / SSE.
 
 ## License
 

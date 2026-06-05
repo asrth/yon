@@ -75,6 +75,12 @@ jobs:
             exe="$(ls Yon.app/Contents/MacOS/*)"
             cp yon-universal "$exe"
             lipo -archs "$exe"
+            # Rename the bundle executable to "Yon": macOS (via Fyne) derives the
+            # app-menu name from the executable basename, so a "yon" binary shows
+            # a lowercase "yon" / "About yon" in the menu bar. Rename + sync
+            # CFBundleExecutable before signing so the menu reads "Yon".
+            mv "$exe" Yon.app/Contents/MacOS/Yon
+            /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Yon" Yon.app/Contents/Info.plist
             # Register the .yon document type so double-clicking a collection in
             # Finder opens it in Yon (same injection as packaging/macos/package.sh).
             sh packaging/macos/register-filetype.sh Yon.app
