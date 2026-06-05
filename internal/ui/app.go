@@ -20,7 +20,7 @@ import (
 
 // AppID is the Fyne application identifier; it scopes Preferences storage
 // (session + settings) and must match the ID passed to app.NewWithID.
-const AppID = "com.ultramcu.yon"
+const AppID = "th.co.asr.yon"
 
 // App is the top-level UI controller. It owns the Fyne app, the live set of
 // Collection windows, and the persisted Settings, and coordinates session

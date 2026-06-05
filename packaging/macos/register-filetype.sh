@@ -8,7 +8,7 @@
 set -eu
 
 APP="${1:-Yon.app}"
-UTI="com.ultramcu.yon.collection"
+UTI="th.co.asr.yon.collection"
 PLIST="$APP/Contents/Info.plist"
 
 if [ ! -f "$PLIST" ]; then
