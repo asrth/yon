@@ -4,6 +4,18 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-06-05
+
+### Fixed
+- The macOS app menu now reads **Yon** (the bundle executable is named `Yon`),
+  not a lowercase `yon` / *About yon* ([#8]).
+
+### Docs
+- README refreshed with the full feature list — SSH jump host, captures +
+  assertions, the variables inspector, per-request overrides, New Request from
+  cURL, and the request log — plus a Highlights section. Added a contributor
+  guide (`contributor.txt`): open an approved issue first, then branch → PR.
+
 ## [1.1.0] - 2026-06-05
 
 ### Added
@@ -332,6 +344,7 @@ First stable release. New home: the project moved to
   the response; save and reopen Collections as human-readable `.yon` files.
   Native builds for macOS (universal), Windows, and Linux.
 
+[1.1.1]: https://github.com/asrth/yon/releases/tag/v1.1.1
 [1.1.0]: https://github.com/asrth/yon/releases/tag/v1.1.0
 [1.0.1]: https://github.com/asrth/yon/releases/tag/v1.0.1
 [1.0.0]: https://github.com/asrth/yon/releases/tag/v1.0.0
@@ -363,6 +376,7 @@ First stable release. New home: the project moved to
 [0.1.0]: https://github.com/ultramcu/yon/releases/tag/v0.1.0
 [#1]: https://github.com/asrth/yon/issues/1
 [#2]: https://github.com/asrth/yon/issues/2
+[#8]: https://github.com/asrth/yon/issues/8
 [#21]: https://github.com/ultramcu/yon/issues/21
 [#22]: https://github.com/ultramcu/yon/issues/22
 [#23]: https://github.com/ultramcu/yon/issues/23
