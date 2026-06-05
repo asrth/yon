@@ -101,7 +101,7 @@ func (a *App) Run(files ...string) {
 		opened := 0
 		for _, f := range files {
 			if err := a.OpenPath(f); err != nil {
-				fmt.Fprintf(os.Stderr, "yon: cannot open %q: %v\n", f, err)
+				fmt.Fprintf(os.Stderr, "Yon: cannot open %q: %v\n", f, err)
 				continue
 			}
 			opened++
@@ -154,7 +154,7 @@ func (a *App) openFromOS(path string) {
 			dialog.ShowError(err, w.win)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "yon: cannot open %q: %v\n", path, err)
+		fmt.Fprintf(os.Stderr, "Yon: cannot open %q: %v\n", path, err)
 	}
 }
 
