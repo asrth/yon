@@ -21,7 +21,7 @@ import (
 
 // apiURL is the GitHub "latest release" endpoint. It is a var so tests can point
 // it at a local server.
-var apiURL = "https://api.github.com/repos/ultramcu/yon/releases/latest"
+var apiURL = "https://api.github.com/repos/asrth/yon/releases/latest"
 
 // httpClient has no global timeout; callers pass a context deadline sized to the
 // operation (a quick check vs. a large download).

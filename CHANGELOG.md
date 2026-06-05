@@ -4,6 +4,27 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-06-05
+
+First stable release. New home: the project moved to
+**https://github.com/asrth/yon** — the in-app update check now points there.
+
+### Added
+- **Response captures + assertions** ([#27]) — extract values from a response
+  into `{{variables}}` for later requests (chaining), and assert on status /
+  JSON path / header / time, all declarative (no scripting).
+- **Combined request log** ([#30]) — a copyable, resizable dock at the bottom
+  logging every send across all tabs.
+- **Variables inspector** ([#29]) — a toggleable right-side panel showing the
+  active environment, collection, and captured (runtime) variables; secrets
+  masked.
+- **cURL as a tab** ([#28]) — the equivalent curl command moved from a dialog to
+  a live tab in the request editor.
+
+### Changed
+- Repository moved from `ultramcu/yon` (now archived) to `asrth/yon`; the update
+  checker and download links point to the new home.
+
 ## [0.14.0] - 2026-06-05
 
 ### Added
@@ -287,6 +308,7 @@ All notable changes to Yon are documented here. The format follows
   the response; save and reopen Collections as human-readable `.yon` files.
   Native builds for macOS (universal), Windows, and Linux.
 
+[1.0.0]: https://github.com/asrth/yon/releases/tag/v1.0.0
 [0.14.0]: https://github.com/ultramcu/yon/releases/tag/v0.14.0
 [0.13.2]: https://github.com/ultramcu/yon/releases/tag/v0.13.2
 [0.13.1]: https://github.com/ultramcu/yon/releases/tag/v0.13.1
@@ -319,3 +341,7 @@ All notable changes to Yon are documented here. The format follows
 [#24]: https://github.com/ultramcu/yon/issues/24
 [#25]: https://github.com/ultramcu/yon/issues/25
 [#26]: https://github.com/ultramcu/yon/issues/26
+[#27]: https://github.com/ultramcu/yon/issues/27
+[#28]: https://github.com/ultramcu/yon/issues/28
+[#29]: https://github.com/ultramcu/yon/issues/29
+[#30]: https://github.com/ultramcu/yon/issues/30

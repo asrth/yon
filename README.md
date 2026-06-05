@@ -72,7 +72,7 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
 
 ## Install
 
-Download a prebuilt build from the [latest release](https://github.com/ultramcu/yon/releases/latest):
+Download a prebuilt build from the [latest release](https://github.com/asrth/yon/releases/latest):
 
 | Platform | Download |
 |---|---|
@@ -89,7 +89,7 @@ Or run / build from source (below).
 Requires **Go 1.26+** and a C toolchain (Fyne uses cgo/OpenGL).
 
 ```sh
-git clone https://github.com/ultramcu/yon
+git clone https://github.com/asrth/yon
 cd yon
 go run .
 ```
