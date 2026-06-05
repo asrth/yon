@@ -1287,7 +1287,6 @@ func (w *Window) buildMainMenu() *fyne.MainMenu {
 		fyne.NewMenuItem("Rename Collection…", w.showRenameCollection),
 		fyne.NewMenuItem("Collection Auth…", w.showCollectionAuth),
 		fyne.NewMenuItem("Environments…", w.showEnvironmentManager),
-		fyne.NewMenuItem("Tunnels…", func() { w.app.openTunnelsWindow(w) }),
 	)
 	// View ▸ Variables toggles the right-side Variables dock (the footer
 	// "Variables" tap does the same); both call toggleVarsPanel.
@@ -1297,6 +1296,7 @@ func (w *Window) buildMainMenu() *fyne.MainMenu {
 	viewMenu := fyne.NewMenu("View",
 		fyne.NewMenuItem("Variables", w.toggleVarsPanel),
 		fyne.NewMenuItem("Request Log", w.toggleLogPanel),
+		fyne.NewMenuItem("Tunnels…", func() { w.app.openTunnelsWindow(w) }),
 	)
 	// macOS: Fyne moves items labelled exactly "About" and "Settings…" into the
 	// system application menu (the one named after the app) — and "About" replaces
