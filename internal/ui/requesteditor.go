@@ -480,16 +480,27 @@ func (rt *requestTab) startSend() {
 			rt.setSending(false)
 			// Resolve the request URL once for the combined request log, so the log
 			// records the real target (env/collection value) rather than {{templates}}.
-			resolvedURL := rt.win.varScope().Resolve(req.URL)
+			resolve := rt.win.varScope().Resolve
+			resolvedURL := resolve(req.URL)
+			// Capture the request EXACTLY as sent (resolved headers + body) so the
+			// log-detail window can show what actually went on the wire. Headers and
+			// body are templated; resolve them with the same scope used for the send.
+			reqHeaders := resolveLogHeaders(req.Headers, resolve)
+			var reqBody string
+			if req.Body.Type != model.BodyNone && req.Body.Type != "" {
+				reqBody = resolve(req.Body.Content)
+			}
 			if err != nil {
 				rt.lastResp = nil
 				rt.response.setError(err)
 				rt.win.appendLog(logEntry{
-					Time:   time.Now(),
-					Name:   req.DisplayName(),
-					Method: string(req.Method),
-					URL:    resolvedURL,
-					Err:    err.Error(),
+					Time:       time.Now(),
+					Name:       req.DisplayName(),
+					Method:     string(req.Method),
+					URL:        resolvedURL,
+					ReqHeaders: reqHeaders,
+					ReqBody:    reqBody,
+					Err:        err.Error(),
 				})
 				rt.win.updateStatusBar()
 				return
@@ -520,19 +531,70 @@ func (rt *requestTab) startSend() {
 			rt.response.setTestResults(results, vars)
 
 			rt.win.appendLog(logEntry{
-				Time:       time.Now(),
-				Name:       req.DisplayName(),
-				Method:     string(req.Method),
-				URL:        resolvedURL,
-				Status:     resp.Status,
-				StatusText: resp.StatusText,
-				Duration:   resp.Duration,
-				Size:       resp.Size,
+				Time:        time.Now(),
+				Name:        req.DisplayName(),
+				Method:      string(req.Method),
+				URL:         resolvedURL,
+				ReqHeaders:  reqHeaders,
+				ReqBody:     reqBody,
+				Status:      resp.Status,
+				StatusText:  resp.StatusText,
+				Duration:    resp.Duration,
+				Size:        resp.Size,
+				RespHeaders: resp.Headers,
+				RespBody:    capLogBody(resp.Body),
 			})
 
 			rt.win.updateStatusBar()
 		})
 	}()
+}
+
+// maxLogBodyBytes caps how many response-body bytes a logEntry retains so the
+// session log cannot balloon memory when many large responses are logged. The
+// true byte count is preserved separately in logEntry.Size; the detail window
+// notes the truncation. 1 MiB is generous for an at-a-glance detail view.
+const maxLogBodyBytes = 1 << 20
+
+// capLogBody returns the first maxLogBodyBytes of body as a fresh slice (so the
+// log does not pin the full, possibly-large response buffer in memory). A body
+// at or under the cap is copied as-is; nil stays nil.
+func capLogBody(body []byte) []byte {
+	if len(body) == 0 {
+		return nil
+	}
+	n := len(body)
+	if n > maxLogBodyBytes {
+		n = maxLogBodyBytes
+	}
+	out := make([]byte, n)
+	copy(out, body[:n])
+	return out
+}
+
+// resolveLogHeaders renders the request's headers as SENT: each ENABLED header's
+// Key and Value run through resolve so {{templates}} match what went on the wire.
+// Disabled rows are dropped (they are not sent). The Enabled flag is set true on
+// the returned Params since every retained row was applied.
+func resolveLogHeaders(headers []model.Param, resolve func(string) string) []model.Param {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make([]model.Param, 0, len(headers))
+	for _, h := range headers {
+		if !h.Enabled {
+			continue
+		}
+		out = append(out, model.Param{
+			Key:     resolve(h.Key),
+			Value:   resolve(h.Value),
+			Enabled: true,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // cancelInFlight cancels a running send (if any) and resets the button. Safe to
