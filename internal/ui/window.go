@@ -391,12 +391,12 @@ func (w *Window) buildSidebarHeader() fyne.CanvasObject {
 	w.refreshSidebarCount()
 
 	add := widget.NewButtonWithIcon("", theme.ContentAddIcon(), w.addRequest)
-	add.Importance = widget.LowImportance
+	add.Importance = widget.MediumImportance
 
 	// "New Folder" affordance next to the request "Add" button, opening a name
 	// dialog and creating an empty, expanded folder.
 	newFolder := widget.NewButtonWithIcon("", theme.FolderNewIcon(), w.showNewFolder)
-	newFolder.Importance = widget.LowImportance
+	newFolder.Importance = widget.MediumImportance
 
 	folder := widget.NewIcon(theme.FolderIcon())
 	header := container.NewBorder(
@@ -408,9 +408,9 @@ func (w *Window) buildSidebarHeader() fyne.CanvasObject {
 
 	// Save / Save As toolbar row under the collection title.
 	saveBtn := widget.NewButtonWithIcon("Save", theme.DocumentSaveIcon(), func() { w.save(nil) })
-	saveBtn.Importance = widget.LowImportance
+	saveBtn.Importance = widget.MediumImportance
 	saveAsBtn := widget.NewButton("Save As…", func() { w.saveAs(nil) })
-	saveAsBtn.Importance = widget.LowImportance
+	saveAsBtn.Importance = widget.MediumImportance
 	toolbar := container.NewHBox(saveBtn, saveAsBtn)
 
 	// Environment picker row: a label + the compact selector ("No Environment" +

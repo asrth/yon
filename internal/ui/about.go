@@ -11,7 +11,7 @@ import (
 )
 
 // repoURL is Yon's source home, linked from the About box.
-const repoURL = "https://github.com/ultramcu/yon"
+const repoURL = "https://github.com/asrth/yon"
 
 // showAboutDialog presents a small "About Yon" card: the app icon, name, running
 // version, slogan, a one-line description, a link to the source, and the licence.
@@ -38,12 +38,16 @@ func (a *App) showAboutDialog(parent fyne.Window) {
 
 	var link fyne.CanvasObject
 	if u, err := url.Parse(repoURL); err == nil {
-		link = widget.NewHyperlink("github.com/ultramcu/yon", u)
+		link = widget.NewHyperlink("github.com/asrth/yon", u)
 	} else {
 		link = widget.NewLabel(repoURL)
 	}
 
 	license := widget.NewLabelWithStyle("MIT License", fyne.TextAlignCenter, fyne.TextStyle{})
+
+	poweredBy := widget.NewLabelWithStyle(
+		"Powered by ADVANCED SOFTWARE AND ROBOTICS CO., LTD.",
+		fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 
 	content := container.NewVBox(
 		container.NewCenter(logo),
@@ -55,6 +59,8 @@ func (a *App) showAboutDialog(parent fyne.Window) {
 		desc,
 		container.NewCenter(link),
 		license,
+		widget.NewSeparator(),
+		poweredBy,
 	)
 
 	dialog.ShowCustom("About Yon", "Close", content, parent)
