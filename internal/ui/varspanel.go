@@ -120,7 +120,7 @@ type varsPanel struct {
 	win       *Window
 	container fyne.CanvasObject
 
-	envSubheader *widget.Label  // "Environment · <name>" / "No active environment"
+	envSubheader *widget.Label   // "Environment · <name>" / "No active environment"
 	envRows      *fyne.Container // configured rows live here
 	runtimeRows  *fyne.Container // runtime rows live here
 }

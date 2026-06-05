@@ -25,7 +25,7 @@ func btFilterWindow(coll model.Collection) *Window {
 func btFilterColl() model.Collection {
 	c := model.NewCollection("Filter Coll")
 	c.Requests = []model.Request{
-		{Name: "Alpha Login", Method: model.MethodPost, URL: "https://api.test/auth/login"},   // 0
+		{Name: "Alpha Login", Method: model.MethodPost, URL: "https://api.test/auth/login"},    // 0
 		{Name: "Bravo Search", Method: model.MethodGet, URL: "https://api.test/zebra/list"},    // 1
 		{Name: "Charlie Delete", Method: model.MethodDelete, URL: "https://api.test/widget/9"}, // 2
 		{Name: "", Method: model.MethodPut, URL: "https://api.test/unicorn/42"},                // 3 (DisplayName derived)

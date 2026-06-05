@@ -42,8 +42,8 @@ func TestCollectionDisplayName(t *testing.T) {
 		name, path, want string
 	}{
 		{"My API", "/tmp/api.yon", "My API"}, // explicit name wins
-		{"", "/tmp/api.yon", "api.yon"},       // empty name → file base
-		{"", "", "Untitled"},                   // nothing → Untitled
+		{"", "/tmp/api.yon", "api.yon"},      // empty name → file base
+		{"", "", "Untitled"},                 // nothing → Untitled
 	}
 	for _, c := range cases {
 		if got := collectionDisplayName(c.name, c.path); got != c.want {

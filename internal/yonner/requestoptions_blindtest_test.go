@@ -13,8 +13,8 @@ import (
 // helpers (blind: only construct from contract symbols)
 // ---------------------------------------------------------------------------
 
-func intPtr(n int) *int     { return &n }
-func boolPtr(b bool) *bool  { return &b }
+func intPtr(n int) *int    { return &n }
+func boolPtr(b bool) *bool { return &b }
 
 // ===========================================================================
 // A. TestApplyRequestOptions

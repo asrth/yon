@@ -89,9 +89,9 @@ func TestDotenvKeyRoundTrip(t *testing.T) {
 	// Multiple entries — a weird key and a normal key together — all round-trip.
 	t.Run("mixed-keys-together", func(t *testing.T) {
 		in := map[string]string{
-			"a=b":                  "weird",
-			"__var.envbase.token":  "normal",
-			" lead-trail ":         "spaced",
+			"a=b":                 "weird",
+			"__var.envbase.token": "normal",
+			" lead-trail ":        "spaced",
 		}
 		got, _ := dekRoundTrip(t, in)
 		if len(got) != len(in) {
@@ -138,8 +138,8 @@ func TestDotenvLegacyUnquotedStillParses(t *testing.T) {
 	got := parseDotenv([]byte(legacy))
 
 	want := map[string]string{
-		"TOKEN":                  "abc",
-		"__jumphost.x.password":  "p w",
+		"TOKEN":                 "abc",
+		"__jumphost.x.password": "p w",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("parseDotenv returned %d entries, want %d: %#v", len(got), len(want), got)

@@ -199,11 +199,11 @@ func TestBlind_SidebarRows_GroupingOrder(t *testing.T) {
 	}
 	// Flat index layout chosen so request rows must carry the correct flat index.
 	coll.Requests = []model.Request{
-		{Name: "top0", Method: model.MethodGet, URL: "u/0", FolderID: ""},   // idx 0 top-level
-		{Name: "f1a", Method: model.MethodGet, URL: "u/1", FolderID: "f1"},  // idx 1 in f1
-		{Name: "f2a", Method: model.MethodGet, URL: "u/2", FolderID: "f2"},  // idx 2 in f2 (collapsed)
-		{Name: "f1b", Method: model.MethodGet, URL: "u/3", FolderID: "f1"},  // idx 3 in f1
-		{Name: "top1", Method: model.MethodGet, URL: "u/4", FolderID: ""},   // idx 4 top-level
+		{Name: "top0", Method: model.MethodGet, URL: "u/0", FolderID: ""},  // idx 0 top-level
+		{Name: "f1a", Method: model.MethodGet, URL: "u/1", FolderID: "f1"}, // idx 1 in f1
+		{Name: "f2a", Method: model.MethodGet, URL: "u/2", FolderID: "f2"}, // idx 2 in f2 (collapsed)
+		{Name: "f1b", Method: model.MethodGet, URL: "u/3", FolderID: "f1"}, // idx 3 in f1
+		{Name: "top1", Method: model.MethodGet, URL: "u/4", FolderID: ""},  // idx 4 top-level
 	}
 	w := btopWindow(t, coll)
 

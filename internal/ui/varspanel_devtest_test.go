@@ -25,9 +25,9 @@ func TestCollectVariableView_PrecedenceDedupeScope(t *testing.T) {
 		},
 	}
 	coll := []model.Variable{
-		{Key: "token", Value: "coll-token", Enabled: true},      // clash → env wins, dropped
-		{Key: "collOnly", Value: "coll-value", Enabled: true},   // kept, scope collection
-		{Key: "disabledColl", Value: "y", Enabled: false},       // dropped
+		{Key: "token", Value: "coll-token", Enabled: true},    // clash → env wins, dropped
+		{Key: "collOnly", Value: "coll-value", Enabled: true}, // kept, scope collection
+		{Key: "disabledColl", Value: "y", Enabled: false},     // dropped
 	}
 
 	configured, _ := collectVariableView(env, coll, nil)

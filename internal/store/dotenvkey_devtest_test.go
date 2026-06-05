@@ -52,12 +52,12 @@ func TestDevDotenvKeyRoundTrip(t *testing.T) {
 		value      string
 		wantQuoted bool // expect the key written as a leading double-quote
 	}{
-		{"delimiter-in-key", "a=b", "v1", true},               // THE headline bug.
-		{"leading-trailing-space", " x ", "v2", true},         // edge whitespace.
-		{"embedded-quote", `a"b`, "v3", true},                 // contains the quote char.
-		{"leading-hash", "#cfg", "v4", true},                  // comment hazard.
-		{"embedded-newline", "l1\nl2", "v5", true},            // newline.
-		{"normal-key", "__var.envbase.token", "v6", false},    // ordinary key: stays raw.
+		{"delimiter-in-key", "a=b", "v1", true},            // THE headline bug.
+		{"leading-trailing-space", " x ", "v2", true},      // edge whitespace.
+		{"embedded-quote", `a"b`, "v3", true},              // contains the quote char.
+		{"leading-hash", "#cfg", "v4", true},               // comment hazard.
+		{"embedded-newline", "l1\nl2", "v5", true},         // newline.
+		{"normal-key", "__var.envbase.token", "v6", false}, // ordinary key: stays raw.
 	}
 
 	for _, tc := range cases {

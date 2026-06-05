@@ -36,7 +36,7 @@ func TestRequestOptionsFromControls_Timeout(t *testing.T) {
 		{"", nil},
 		{"abc", nil},
 		{"-1", nil},
-		{"0", intp(0)},  // explicit "no timeout"
+		{"0", intp(0)}, // explicit "no timeout"
 		{"30", intp(30)},
 	}
 	for _, c := range cases {
@@ -112,10 +112,10 @@ func TestOptionsRoundTrip(t *testing.T) {
 		follow  string
 		tls     string
 	}{
-		{"", optDefault, optDefault},     // all default → nil
+		{"", optDefault, optDefault}, // all default → nil
 		{"30", optFollow, optTLSVerify},
-		{"0", optNoFollow, optTLSAllow},  // explicit no-timeout + overrides
-		{"", optFollow, optDefault},      // partial override
+		{"0", optNoFollow, optTLSAllow}, // explicit no-timeout + overrides
+		{"", optFollow, optDefault},     // partial override
 	}
 	for _, c := range cases {
 		ro := requestOptionsFromControls(c.timeout, c.follow, c.tls)

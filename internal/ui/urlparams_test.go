@@ -45,7 +45,7 @@ func TestParseQueryParams(t *testing.T) {
 func TestEncodeQueryParams(t *testing.T) {
 	in := []model.Param{
 		{Key: "account", Value: "x", Enabled: true},
-		{Key: "disabled", Value: "no", Enabled: false}, // skipped
+		{Key: "disabled", Value: "no", Enabled: false},    // skipped
 		{Key: "server", Value: "{{host}}", Enabled: true}, // template kept readable
 		{Key: "", Value: "", Enabled: true},               // empty row skipped
 	}

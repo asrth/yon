@@ -9,9 +9,9 @@ func TestUrlPathOf(t *testing.T) {
 		{"", ""},
 		{"https://api.example.com/users", "/users"},
 		{"/users", "/users"},
-		{"167.99.78.232:8787/usage", "/usage"},   // scheme-less host:port → path only
+		{"167.99.78.232:8787/usage", "/usage"},      // scheme-less host:port → path only
 		{"api.example.com/v1/things", "/v1/things"}, // scheme-less host → path only
-		{"{{server}}", "{{server}}"},              // unresolved template → left as-is
+		{"{{server}}", "{{server}}"},                // unresolved template → left as-is
 	}
 	for _, c := range cases {
 		if got := urlPathOf(c.raw); got != c.want {

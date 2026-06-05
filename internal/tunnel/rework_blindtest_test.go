@@ -129,7 +129,7 @@ func TestEnsure_ConcurrentFirstDial_DialsOnce(t *testing.T) {
 	// arrival as soon as we see it; that is enough for the correct code to let
 	// the winner finish and the rest reuse the result.
 	go func() {
-		<-d.entered     // wait for at least one dial to enter
+		<-d.entered      // wait for at least one dial to enter
 		close(d.release) // let every (current and future) blocked dial proceed
 	}()
 
@@ -176,10 +176,10 @@ func TestEnsure_ConcurrentFirstDial_DialsOnce(t *testing.T) {
 // times and then returns an error deterministically — driving the production
 // keepalive loop's ticker→probe→markDropped path.
 type rwKeepaliveConn struct {
-	mu        sync.Mutex
-	probes    int
-	okBefore  int  // succeed this many probes, then error
-	closed    bool
+	mu       sync.Mutex
+	probes   int
+	okBefore int // succeed this many probes, then error
+	closed   bool
 }
 
 func (c *rwKeepaliveConn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
