@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
 	"github.com/ultramcu/yon/internal/ui"
@@ -26,6 +27,14 @@ var fyneAppTOML string
 
 func main() {
 	ui.SetBuildVersion(tomlVersion(fyneAppTOML))
+	// Set the human-friendly name so "Yon" shows everywhere (e.g. the macOS menu
+	// bar) even for a plain `go build`/`go run`, not just the packaged release —
+	// otherwise Fyne falls back to the executable name ("yon").
+	app.SetMetadata(fyne.AppMetadata{
+		ID:      ui.AppID,
+		Name:    "Yon",
+		Version: tomlVersion(fyneAppTOML),
+	})
 	a := app.NewWithID(ui.AppID)
 	// Any .yon file paths passed on the command line are opened on launch
 	// (and take precedence over restoring the previous session).
