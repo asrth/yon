@@ -4,6 +4,12 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-06-05
+
+### Changed
+- macOS builds are now **code-signed (Developer ID) and notarized** by Apple, so
+  the `.dmg` opens without the Gatekeeper *“cannot verify”* warning.
+
 ## [1.0.0] - 2026-06-05
 
 First stable release. New home: the project moved to
@@ -308,6 +314,7 @@ First stable release. New home: the project moved to
   the response; save and reopen Collections as human-readable `.yon` files.
   Native builds for macOS (universal), Windows, and Linux.
 
+[1.0.1]: https://github.com/asrth/yon/releases/tag/v1.0.1
 [1.0.0]: https://github.com/asrth/yon/releases/tag/v1.0.0
 [0.14.0]: https://github.com/ultramcu/yon/releases/tag/v0.14.0
 [0.13.2]: https://github.com/ultramcu/yon/releases/tag/v0.13.2
