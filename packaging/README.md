@@ -19,7 +19,7 @@ sh packaging/macos/package.sh
 ```
 
 Builds `Yon.app` with `fyne package`, then injects `CFBundleDocumentTypes` and an
-exported UTI (`com.ultramcu.yon.collection`, conforming to `public.json`) into the
+exported UTI (`th.co.asr.yon.collection`, conforming to `public.json`) into the
 bundle's `Info.plist`. Move the app to `/Applications` (or `open Yon.app` once) so
 Launch Services records the association. Then double-clicking a `.yon` file opens
 it; the in-app handler turns the Apple Event into a normal `OpenPath` call.

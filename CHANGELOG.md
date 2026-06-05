@@ -10,11 +10,16 @@ All notable changes to Yon are documented here. The format follows
 - The macOS app menu now reads **Yon** (the bundle executable is named `Yon`),
   not a lowercase `yon` / *About yon* ([#8]).
 
+### Changed
+- App identifier rebranded from `com.ultramcu.yon` to **`th.co.asr.yon`** now that
+  the project lives under asrth ([#11]). (Existing installs start with fresh
+  settings once; signing/notarization is unaffected.)
+
 ### Docs
 - README refreshed with the full feature list — SSH jump host, captures +
   assertions, the variables inspector, per-request overrides, New Request from
-  cURL, and the request log — plus a Highlights section. Added a contributor
-  guide (`contributor.txt`): open an approved issue first, then branch → PR.
+  cURL, and the request log — plus a Highlights section. Added **CONTRIBUTING.md**:
+  open an approved issue first, then branch → PR.
 
 ## [1.1.0] - 2026-06-05
 
@@ -377,6 +382,7 @@ First stable release. New home: the project moved to
 [#1]: https://github.com/asrth/yon/issues/1
 [#2]: https://github.com/asrth/yon/issues/2
 [#8]: https://github.com/asrth/yon/issues/8
+[#11]: https://github.com/asrth/yon/issues/11
 [#21]: https://github.com/ultramcu/yon/issues/21
 [#22]: https://github.com/ultramcu/yon/issues/22
 [#23]: https://github.com/ultramcu/yon/issues/23
