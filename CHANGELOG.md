@@ -4,6 +4,24 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-06-05
+
+### Added
+- **Variables panel: copy values** ([#1]) — each variable shows as a `KEY : VALUE`
+  row; **double-click a row to copy its value** to the clipboard (secrets are
+  masked on screen but the real value is copied).
+- **Request log: detail view** ([#2]) — the bottom request log is now a list, and
+  **double-clicking a row opens a detail window** with the full request (method,
+  URL, headers, body sent) and response (status, headers, body), JSON
+  pretty-printed.
+
+### Changed
+- Sidebar **Save / Save As… / New Folder / New Request** now render as proper
+  buttons (they previously looked like flat text).
+- The **About** box links to the new home **github.com/asrth/yon** and shows
+  *Powered by ADVANCED SOFTWARE AND ROBOTICS CO., LTD.*
+- The app name shows as **Yon** in the macOS menu bar in every build mode.
+
 ## [1.0.1] - 2026-06-05
 
 ### Changed
@@ -314,6 +332,7 @@ First stable release. New home: the project moved to
   the response; save and reopen Collections as human-readable `.yon` files.
   Native builds for macOS (universal), Windows, and Linux.
 
+[1.1.0]: https://github.com/asrth/yon/releases/tag/v1.1.0
 [1.0.1]: https://github.com/asrth/yon/releases/tag/v1.0.1
 [1.0.0]: https://github.com/asrth/yon/releases/tag/v1.0.0
 [0.14.0]: https://github.com/ultramcu/yon/releases/tag/v0.14.0
@@ -342,6 +361,8 @@ First stable release. New home: the project moved to
 [0.3.0]: https://github.com/ultramcu/yon/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ultramcu/yon/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ultramcu/yon/releases/tag/v0.1.0
+[#1]: https://github.com/asrth/yon/issues/1
+[#2]: https://github.com/asrth/yon/issues/2
 [#21]: https://github.com/ultramcu/yon/issues/21
 [#22]: https://github.com/ultramcu/yon/issues/22
 [#23]: https://github.com/ultramcu/yon/issues/23
