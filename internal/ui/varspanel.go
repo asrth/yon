@@ -98,16 +98,27 @@ func collectVariableView(env model.Environment, collVars []model.Variable, runti
 	return configured, runtimeRows
 }
 
-// renderVarLine returns the one-line display text for a row, "Key = Value". For
-// a Secret row the value is MASKED as secretMask ("Key = ••••") — the secret's
-// clear Value MUST NOT appear in the output (privacy requirement). Pure and
-// Fyne-free so the panel widgets and the blind tester share one source of truth.
-func renderVarLine(v varView) string {
-	value := v.Value
+// varRowDisplay returns a row's display strings: the key as-is, and the DISPLAY
+// value — secretMask for a Secret row (its clear Value MUST NOT appear on screen,
+// privacy requirement), otherwise the verbatim Value. This is the single
+// Fyne-free source of truth for what the user SEES; the real Value (the copy
+// source on double-click) is taken straight from varView.Value, never from here.
+func varRowDisplay(v varView) (key, value string) {
+	value = v.Value
 	if v.Secret {
 		value = secretMask
 	}
-	return v.Key + " = " + value
+	return v.Key, value
+}
+
+// renderVarLine returns the one-line display text for a row, "Key = Value". For
+// a Secret row the value is MASKED as secretMask ("Key = ••••") — the secret's
+// clear Value MUST NOT appear in the output (privacy requirement). Pure and
+// Fyne-free so the panel widgets and the blind tester share one source of truth;
+// it is built on varRowDisplay so the masking rule lives in exactly one place.
+func renderVarLine(v varView) string {
+	key, value := varRowDisplay(v)
+	return key + " = " + value
 }
 
 // ---- Panel UI (read-only) ----
@@ -178,7 +189,7 @@ func (p *varsPanel) refresh() {
 		p.envRows.Add(mutedText("No variables."))
 	} else {
 		for _, v := range configured {
-			p.envRows.Add(varLineWidget(v))
+			p.envRows.Add(varLineWidget(v, p.copyValue))
 		}
 	}
 	p.envRows.Refresh()
@@ -189,26 +200,96 @@ func (p *varsPanel) refresh() {
 		p.runtimeRows.Add(mutedText("No captured values yet — send a request with a Capture."))
 	} else {
 		for _, v := range runtimeRows {
-			p.runtimeRows.Add(varLineWidget(v))
+			p.runtimeRows.Add(varLineWidget(v, p.copyValue))
 		}
 	}
 	p.runtimeRows.Refresh()
 }
 
-// varLineWidget builds the read-only label for one row, using renderVarLine for
-// the text (so secrets are masked identically to the pure helper). A
-// collection-scoped row is de-emphasised (placeholder colour) to set it apart
-// from the higher-precedence env variables.
-func varLineWidget(v varView) fyne.CanvasObject {
-	line := renderVarLine(v)
-	if v.Scope == scopeCollection {
-		return mutedText(line)
+// copyValue copies a variable's REAL value to the clipboard and flashes a brief
+// "Copied <key>" confirmation in the footer status bar. Double-clicking a row is
+// the explicit "give me the value" action, so even a Secret copies its CLEAR
+// Value (v.Value) — masking is only to stop shoulder-surfing the on-screen value,
+// never to block the deliberate copy. Passed into each row widget so the row
+// needs no direct Window/clipboard reference of its own; safe before the bar is
+// built (flashStatus no-ops). A nil app clipboard is tolerated (test/headless).
+func (p *varsPanel) copyValue(v varView) {
+	if app := fyne.CurrentApp(); app != nil {
+		app.Clipboard().SetContent(v.Value)
 	}
-	return widget.NewLabel(line)
+	if p.win != nil {
+		p.win.flashStatus("Copied " + v.Key)
+	}
+}
+
+// varRowWidget is the read-only Variables row widget: it renders "[KEY] : [VALUE]" —
+// the key accented/bold, a muted ":" separator, then the display value (masked
+// for secrets, de-emphasised for collection-scoped rows) — and is double-tappable
+// (fyne.DoubleTappable). A double-click copies the row's REAL value via the
+// onCopy callback (see varsPanel.copyValue). It is purely a display row: it takes
+// no keyboard focus and has no single-tap behaviour, only the double-tap copy.
+type varRowWidget struct {
+	widget.BaseWidget
+	v      varView
+	onCopy func(varView)
+}
+
+// newVarRowWidget builds the row widget for v, copying its real value via onCopy
+// on a double-tap.
+func newVarRowWidget(v varView, onCopy func(varView)) *varRowWidget {
+	r := &varRowWidget{v: v, onCopy: onCopy}
+	r.ExtendBaseWidget(r)
+	return r
+}
+
+// CreateRenderer lays the row out as key : value. The key is accented + bold; the
+// separator and value are muted for a collection-scoped row, and the value column
+// shows the DISPLAY value (secretMask for secrets) — the clear secret never
+// appears on screen. Built from canvas.Text so it stays a non-interactive,
+// read-only look (no Entry chrome) while the widget itself handles the double-tap.
+func (r *varRowWidget) CreateRenderer() fyne.WidgetRenderer {
+	_, value := varRowDisplay(r.v)
+
+	key := canvas.NewText(r.v.Key, theme.Color(theme.ColorNamePrimary))
+	key.TextStyle = fyne.TextStyle{Bold: true}
+	key.TextSize = theme.TextSize()
+
+	sep := canvas.NewText(":", theme.Color(theme.ColorNamePlaceHolder))
+	sep.TextSize = theme.TextSize()
+
+	// A collection-scoped row is de-emphasised (placeholder colour) to set it apart
+	// from the higher-precedence env variables; other scopes use the normal text.
+	valColor := theme.Color(theme.ColorNameForeground)
+	if r.v.Scope == scopeCollection {
+		valColor = theme.Color(theme.ColorNamePlaceHolder)
+	}
+	val := canvas.NewText(value, valColor)
+	val.TextSize = theme.TextSize()
+
+	row := container.NewHBox(key, sep, val)
+	return widget.NewSimpleRenderer(row)
+}
+
+// DoubleTapped copies the row's REAL value (fyne.DoubleTappable). Even for a
+// Secret row this hands over the clear Value — the double-click is the explicit
+// reveal-and-copy gesture; the on-screen mask only guards passive viewing.
+func (r *varRowWidget) DoubleTapped(*fyne.PointEvent) {
+	if r.onCopy != nil {
+		r.onCopy(r.v)
+	}
+}
+
+// varLineWidget builds the read-only "[KEY] : [VALUE]" row widget for one row,
+// double-tappable to copy that variable's value via onCopy. Secrets are masked on
+// screen identically to renderVarLine (both go through varRowDisplay); a
+// collection-scoped row is de-emphasised to set it apart from env variables.
+func varLineWidget(v varView, onCopy func(varView)) fyne.CanvasObject {
+	return newVarRowWidget(v, onCopy)
 }
 
 // mutedText returns a non-interactive, de-emphasised line using the placeholder
-// theme colour (the codebase idiom for muted read-only text).
+// theme colour (the codebase idiom for muted read-only text). Used for the
+// empty-state rows ("No variables.", "No captured values yet…").
 func mutedText(s string) fyne.CanvasObject {
 	t := canvas.NewText(s, theme.Color(theme.ColorNamePlaceHolder))
 	t.TextSize = theme.TextSize()

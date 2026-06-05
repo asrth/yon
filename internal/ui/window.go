@@ -1803,6 +1803,21 @@ func (w *Window) updateStatusBar() {
 	w.updateTunnelIndicator()
 }
 
+// flashStatus shows a brief transient message in the footer status text (e.g.
+// "Copied apiKey" after a Variables-row double-click). It writes straight into
+// sbStatus and is intentionally NOT persisted anywhere: the next updateStatusBar
+// — driven by the active tab's request/response on the very next change — fully
+// rewrites sbStatus.Text/Color, so the flash is self-clearing and can never leave
+// the bar stuck. Safe before the bar is built (no-op).
+func (w *Window) flashStatus(msg string) {
+	if w.sbStatus == nil {
+		return
+	}
+	w.sbStatus.Text = msg
+	w.sbStatus.Color = theme.Color(theme.ColorNamePrimary)
+	w.sbStatus.Refresh()
+}
+
 // updateTunnelIndicator refreshes the footer jump-host dot. It shows a coloured
 // dot + the active environment's name when activeJumpHost reports a complete
 // jump host (green if that host's Tunnel is Connected, grey otherwise), and
