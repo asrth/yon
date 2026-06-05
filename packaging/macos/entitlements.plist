@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements used when code-signing Yon with a Developer ID + hardened runtime
+  for Apple notarization (see .github/workflows/release.yml). Yon is a Go + Fyne
+  (cgo/OpenGL) app; these three entitlements are the ones such apps commonly need
+  under the hardened runtime so the JITed/GL paths are not killed. Yon makes no
+  outbound calls beyond the user's own requests and reads/writes only files the
+  user picks, so no additional capabilities are requested.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

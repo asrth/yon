@@ -40,8 +40,25 @@ jobs:
       - name: Install Fyne CLI
         run: go install fyne.io/tools/cmd/fyne@latest
 
+      # macOS code signing / notarization is OPTIONAL and graceful: if the
+      # Developer ID secrets below are set, the .app is signed with the hardened
+      # runtime and the .dmg is notarized + stapled (no Gatekeeper warning). If
+      # they are NOT set, the app is only AD-HOC signed — which still prevents the
+      # "app is damaged" error on Apple Silicon, but users will see the "cannot
+      # verify" prompt and must Open Anyway / strip the quarantine attribute.
+      # Secrets to enable full notarization (repo Settings ▸ Secrets ▸ Actions):
+      #   MACOS_CERTIFICATE      base64 of the Developer ID Application .p12
+      #   MACOS_CERTIFICATE_PWD  password for that .p12
+      #   MACOS_SIGN_IDENTITY    e.g. "Developer ID Application: Name (TEAMID)"
+      #   APPLE_ID               Apple ID email used for notarytool
+      #   APPLE_TEAM_ID          10-char Apple Team ID
+      #   APPLE_APP_PASSWORD     app-specific password for that Apple ID
       - name: Package
         shell: bash
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
@@ -61,12 +78,37 @@ jobs:
             # Register the .yon document type so double-clicking a collection in
             # Finder opens it in Yon (same injection as packaging/macos/package.sh).
             sh packaging/macos/register-filetype.sh Yon.app
+            # Code sign the finished .app. Developer ID (+ hardened runtime) when
+            # the cert is configured; ad-hoc otherwise.
+            if [ -n "${MACOS_CERTIFICATE:-}" ]; then
+              echo "Signing with Developer ID + hardened runtime (notarizable)"
+              KEYCHAIN="$RUNNER_TEMP/build.keychain"
+              security create-keychain -p actions "$KEYCHAIN"
+              security set-keychain-settings -lut 21600 "$KEYCHAIN"
+              security unlock-keychain -p actions "$KEYCHAIN"
+              security default-keychain -s "$KEYCHAIN"
+              echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+              security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+              security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "$KEYCHAIN" >/dev/null
+              codesign --force --deep --options runtime --timestamp \
+                --entitlements packaging/macos/entitlements.plist \
+                --sign "$MACOS_SIGN_IDENTITY" Yon.app
+              codesign --verify --strict --verbose=2 Yon.app
+            else
+              echo "No Developer ID secret — ad-hoc signing (fixes 'damaged' on Apple Silicon; NOT notarized)"
+              codesign --force --deep --sign - Yon.app
+            fi
           else
             "$FYNE" package -os ${{ matrix.target }}
           fi
 
       - name: Archive
         shell: bash
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -91,6 +133,16 @@ jobs:
                   ln -s /Applications dmgstage/Applications
                   hdiutil create -volname "Yon" -srcfolder dmgstage -ov -format UDZO "$DMG"
                 }
+              # Notarize + staple the .dmg when Apple credentials are configured
+              # (the app inside was Developer-ID signed above). Skipped otherwise.
+              if [ -n "${MACOS_CERTIFICATE:-}" ]; then
+                echo "Submitting $DMG to Apple notarization (this can take a few minutes)…"
+                xcrun notarytool submit "$DMG" \
+                  --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" \
+                  --wait
+                xcrun stapler staple "$DMG"
+                xcrun stapler validate "$DMG"
+              fi
               ;;
             windows) 7z a  "dist/Yon-${GITHUB_REF_NAME}-windows.zip" Yon.exe ;;
             linux)   mv Yon.tar.xz "dist/Yon-${GITHUB_REF_NAME}-linux.tar.xz" ;;

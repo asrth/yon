@@ -85,3 +85,27 @@ so confirm them when cutting a release:
   (`public.json` / `application/json`). A user's default JSON handler can appear
   in "Open with"; on some desktops it could shadow Yon. Drop the subclass if that
   becomes a problem.
+
+## macOS code signing & notarization
+
+Release builds are **ad-hoc signed** by default — this fixes the *"app is
+damaged"* error on Apple Silicon, but macOS still shows a *"cannot verify…"*
+Gatekeeper prompt (users click **Open Anyway** in System Settings ▸ Privacy &
+Security, or run `xattr -dr com.apple.quarantine /Applications/Yon.app`).
+
+To ship a **notarized** build with no Gatekeeper warning, add these repository
+secrets (Settings ▸ Secrets and variables ▸ Actions) — the release workflow then
+signs with the hardened runtime and notarizes + staples the `.dmg` automatically
+(`packaging/macos/entitlements.plist` is used for signing):
+
+| Secret | Value |
+|---|---|
+| `MACOS_CERTIFICATE` | base64 of your **Developer ID Application** `.p12` |
+| `MACOS_CERTIFICATE_PWD` | password for that `.p12` |
+| `MACOS_SIGN_IDENTITY` | e.g. `Developer ID Application: Your Name (TEAMID)` |
+| `APPLE_ID` | Apple ID email used for `notarytool` |
+| `APPLE_TEAM_ID` | 10-character Apple Team ID |
+| `APPLE_APP_PASSWORD` | an app-specific password for that Apple ID |
+
+Requires a paid **Apple Developer** membership. Without the secrets the workflow
+falls back to ad-hoc signing, so releases keep working either way.

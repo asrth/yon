@@ -80,7 +80,10 @@ Download a prebuilt build from the [latest release](https://github.com/asrth/yon
 | **Windows** | `Yon-*-windows.zip` |
 | **Linux** | `Yon-*-linux.tar.xz` |
 
-> macOS is unsigned, so on first launch right-click the app → **Open** to bypass Gatekeeper.
+> macOS builds aren't notarized by Apple. If you see **“Yon” Not Opened — Apple
+> could not verify it is free of malware**, open **System Settings ▸ Privacy &
+> Security**, scroll down and click **Open Anyway**, then open Yon again. Or run
+> this once in Terminal: `xattr -dr com.apple.quarantine /Applications/Yon.app`.
 
 Or run / build from source (below).
 
