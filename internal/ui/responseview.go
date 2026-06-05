@@ -18,6 +18,7 @@ import (
 
 	"github.com/ultramcu/yon/internal/model"
 	"github.com/ultramcu/yon/internal/postresp"
+	"github.com/ultramcu/yon/internal/updater"
 )
 
 // maxDisplayBytes caps how much of a response body is rendered on screen. Larger
@@ -107,10 +108,31 @@ type responseView struct {
 	bodyList  *widget.List
 	bodyLines []string
 
-	// bodyStack holds both viewers; renderBody shows exactly one of bodyScroll
-	// (the TextGrid) or bodyList depending on body size.
+	// bodyStack holds the body viewers; renderBody shows exactly ONE of:
+	// bodyScroll (small/Raw TextGrid), bodyList (large body), bodyImageScroll (an
+	// image preview) or bodyPDF (a PDF panel). The kind is chosen by
+	// classifyBody(contentType, fullBody) — see renderBody.
 	bodyStack  *fyne.Container
 	bodyScroll *container.Scroll
+
+	// bodyImage previews an image response (issue #16). It is built per-response
+	// from rv.fullBody (canvas.NewImageFromResource over a static resource),
+	// scaled to fit (ImageFillContain) inside bodyImageScroll so a large image
+	// scrolls rather than forcing the pane open. The scroll is added to bodyStack
+	// only while the image is the active viewer and removed by hideImage, so a
+	// later text/PDF response leaves no *canvas.Image in the tree. Both fields are
+	// nil when no image is shown. For an image the Pretty/Raw toggle means: Pretty
+	// = the image preview, Raw = the raw-bytes text viewer (bytes stay inspectable).
+	bodyImage       *canvas.Image
+	bodyImageScroll *container.Scroll
+
+	// bodyPDF previews a PDF response: an icon, a "PDF document · <size>" label
+	// and Save…/Open buttons. yon does not render PDF pages itself (no new deps);
+	// the panel hands the bytes to the OS via Open (updater.OpenFile to a temp
+	// file) or Save Output As…. Like the image preview it is inserted into
+	// bodyStack only while active and removed by hidePDF; nil when no PDF is shown.
+	bodyPDF      *fyne.Container
+	bodyPDFLabel *widget.Label
 
 	// respTabs is the Body/Headers/Tests segmented sub-tab control (same component
 	// as the request editor). Body is the default tab and gives bodyStack the full
@@ -241,6 +263,11 @@ func newResponseView(parent fyne.Window) *responseView {
 	// the lightweight List (large bodies). renderBody shows exactly one. UNCHANGED
 	// perf architecture — only its surrounding layout differs.
 	rv.bodyScroll = container.NewVScroll(rv.bodyGrid)
+
+	// The image preview and PDF panel (issue #16) are built lazily and inserted
+	// into bodyStack only while they are the active viewer, then removed again —
+	// so a text or PDF response leaves no *canvas.Image in the tree, and the
+	// default bodyStack is exactly {bodyScroll, bodyList} (the perf architecture).
 	rv.bodyStack = container.NewStack(rv.bodyScroll, rv.bodyList)
 
 	// Body / Headers sub-tabs (same segTabs component as the request editor) so the
@@ -405,8 +432,16 @@ func (rv *responseView) setResponse(resp model.Response) {
 	rv.statusLabel.Text = fmt.Sprintf("%d %s", resp.Status, resp.StatusText)
 	rv.applyStatusPill(statusColor(resp.Status))
 
-	rv.metaLabel.SetText(fmt.Sprintf("   %s   ·   %s",
-		formatDuration(resp.Duration), formatSize(resp.Size)))
+	meta := fmt.Sprintf("   %s   ·   %s",
+		formatDuration(resp.Duration), formatSize(resp.Size))
+	// Issue #16: append the pixel dimensions of an image response, when readable
+	// (PNG/JPEG/GIF; WebP/BMP preview but report no size via image.DecodeConfig).
+	if classifyBody(rv.contentType, rv.fullBody) == bodyKindImage {
+		if w, h, ok := imageDimensions(rv.fullBody); ok {
+			meta += fmt.Sprintf("   ·   %d×%d", w, h)
+		}
+	}
+	rv.metaLabel.SetText(meta)
 
 	rv.renderHeaders(resp.Headers)
 	rv.renderBody()
@@ -676,6 +711,26 @@ func (rv *responseView) renderBody() {
 		return
 	}
 
+	// Issue #16: route binary bodies to a preview instead of raw bytes. An image
+	// shows the image preview in Pretty mode and the raw-bytes text view in Raw
+	// mode (so the bytes stay inspectable); a PDF always shows the PDF panel. Find
+	// keeps the text path so matches can be highlighted.
+	if !rv.findActive {
+		switch classifyBody(rv.contentType, rv.fullBody) {
+		case bodyKindImage:
+			if rv.pretty {
+				rv.noticeLabel.Hide()
+				rv.showImage()
+				return
+			}
+			// Raw on an image: fall through to the text path (raw bytes).
+		case bodyKindPDF:
+			rv.noticeLabel.Hide()
+			rv.showPDF()
+			return
+		}
+	}
+
 	body := rv.fullBody
 	truncated := false
 	if len(body) > maxDisplayBytes {
@@ -729,6 +784,8 @@ func (rv *responseView) renderBody() {
 func (rv *responseView) showSmallBody(display string, kind bodyKind) {
 	rv.bodyLines = nil
 	rv.bodyList.Hide()
+	rv.hideImage()
+	rv.hidePDF()
 
 	switch kind {
 	case kindJSON:
@@ -750,6 +807,8 @@ func (rv *responseView) showSmallBody(display string, kind bodyKind) {
 func (rv *responseView) showLargeBody(display string) {
 	rv.bodyGrid.SetText("")
 	rv.bodyScroll.Hide()
+	rv.hideImage()
+	rv.hidePDF()
 
 	rv.bodyLines = strings.Split(display, "\n")
 	rv.bodyList.Refresh()
@@ -757,13 +816,171 @@ func (rv *responseView) showLargeBody(display string) {
 	rv.bodyList.Show()
 }
 
-// clearBody resets both Body viewers to empty.
+// clearBody resets every Body viewer to empty and shows the (empty) TextGrid —
+// so a stale image or PDF preview never lingers behind a later text response or a
+// pending/error state.
 func (rv *responseView) clearBody() {
 	rv.bodyLines = nil
 	rv.bodyGrid.SetText("")
 	rv.bodyList.Refresh()
 	rv.bodyList.Hide()
+	rv.hideImage()
+	rv.hidePDF()
 	rv.bodyScroll.Show()
+}
+
+// hideImage removes the image preview from the body stack (so no *canvas.Image
+// lingers in the tree behind a later response) and drops its backing bytes.
+func (rv *responseView) hideImage() {
+	if rv.bodyImageScroll != nil {
+		rv.removeFromStack(rv.bodyImageScroll)
+		rv.bodyImageScroll = nil
+	}
+	rv.bodyImage = nil
+}
+
+// hidePDF removes the PDF panel from the body stack.
+func (rv *responseView) hidePDF() {
+	if rv.bodyPDF != nil {
+		rv.removeFromStack(rv.bodyPDF)
+		rv.bodyPDF = nil
+		rv.bodyPDFLabel = nil
+	}
+}
+
+// removeFromStack drops obj from bodyStack.Objects (no-op if absent) and refreshes.
+func (rv *responseView) removeFromStack(obj fyne.CanvasObject) {
+	objs := rv.bodyStack.Objects[:0]
+	for _, o := range rv.bodyStack.Objects {
+		if o != obj {
+			objs = append(objs, o)
+		}
+	}
+	rv.bodyStack.Objects = objs
+	rv.bodyStack.Refresh()
+}
+
+// showImage builds an image preview from the full response body and makes it the
+// visible Body viewer, hiding the text viewers and removing any PDF panel. The
+// preview is inserted into bodyStack only while it is active (and removed by
+// hideImage), so a later text/PDF response leaves no image behind. The image is
+// wrapped in a fresh static resource so canvas.Image loads the new bytes.
+func (rv *responseView) showImage() {
+	rv.bodyLines = nil
+	rv.bodyGrid.SetText("")
+	rv.bodyScroll.Hide()
+	rv.bodyList.Hide()
+	rv.hidePDF()
+	rv.hideImage() // drop a previous image before building the new one
+
+	rv.bodyImage = canvas.NewImageFromResource(fyne.NewStaticResource("response", rv.fullBody))
+	rv.bodyImage.FillMode = canvas.ImageFillContain
+	rv.bodyImage.SetMinSize(fyne.NewSize(120, 120))
+	rv.bodyImageScroll = container.NewScroll(container.NewCenter(rv.bodyImage))
+
+	rv.bodyStack.Add(rv.bodyImageScroll)
+	rv.bodyStack.Refresh()
+}
+
+// showPDF builds the PDF panel and makes it the visible Body viewer, hiding the
+// text viewers and removing any image preview. Like the image preview the panel
+// is inserted into bodyStack only while active.
+func (rv *responseView) showPDF() {
+	rv.bodyLines = nil
+	rv.bodyGrid.SetText("")
+	rv.bodyScroll.Hide()
+	rv.bodyList.Hide()
+	rv.hideImage()
+	rv.hidePDF() // rebuild fresh so the size line tracks the current body
+
+	rv.bodyPDF = rv.buildPDFPanel()
+	rv.bodyPDFLabel.SetText(fmt.Sprintf("PDF document  ·  %s", formatSize(int64(len(rv.fullBody)))))
+
+	rv.bodyStack.Add(rv.bodyPDF)
+	rv.bodyStack.Refresh()
+}
+
+// buildPDFPanel constructs the static PDF preview panel: a "PDF" glyph, a size
+// label and Save…/Open buttons. yon ships no PDF renderer (no new deps); the
+// panel offers Save Output As… (reusing saveToFile, defaulting response.pdf) and
+// Open, which writes the bytes to a temp file and hands it to the OS default app
+// (updater.OpenFile: macOS `open`, Linux `xdg-open`, Windows `start`).
+//
+// The panel deliberately uses text-only widgets (no widget.Icon / icon buttons,
+// each of which renders a canvas.Image): the only *canvas.Image the body region
+// ever holds is a genuine image preview, so "is an image being previewed?" stays
+// answerable by scanning the body for a canvas.Image.
+func (rv *responseView) buildPDFPanel() *fyne.Container {
+	glyph := canvas.NewText("PDF", theme.Color(theme.ColorNamePlaceHolder))
+	glyph.TextStyle = fyne.TextStyle{Bold: true}
+	glyph.TextSize = theme.TextSize() * 2
+	glyph.Alignment = fyne.TextAlignCenter
+
+	rv.bodyPDFLabel = widget.NewLabel("PDF document")
+	rv.bodyPDFLabel.Alignment = fyne.TextAlignCenter
+
+	saveBtn := widget.NewButton("Save…", rv.savePDF)
+	openBtn := widget.NewButton("Open", rv.openPDF)
+	saveBtn.Importance = widget.HighImportance
+	buttons := container.NewHBox(layout.NewSpacer(), saveBtn, openBtn, layout.NewSpacer())
+
+	col := container.NewVBox(
+		layout.NewSpacer(),
+		container.NewCenter(glyph),
+		rv.bodyPDFLabel,
+		buttons,
+		layout.NewSpacer(),
+	)
+	return container.NewCenter(col)
+}
+
+// savePDF writes the full PDF body to a user-chosen file, defaulting the name to
+// response.pdf (reusing the same native/Fyne save path as Save Output As…).
+func (rv *responseView) savePDF() {
+	if rv.fullBody == nil {
+		return
+	}
+	go func() {
+		path, ok, err := nativeSaveAny("Save PDF", "response.pdf")
+		fyne.Do(func() {
+			switch {
+			case err != nil:
+				rv.saveToFileFyne()
+			case !ok:
+				// cancelled
+			default:
+				if werr := os.WriteFile(path, rv.fullBody, 0o644); werr != nil {
+					dialog.ShowError(werr, rv.parent)
+				}
+			}
+		})
+	}()
+}
+
+// openPDF writes the body to a temp .pdf and opens it in the OS default viewer
+// (updater.OpenFile). The temp file is left for the viewer to read (cleaning it
+// up immediately would race the launcher); the OS tempdir is reclaimed by the
+// system. Errors surface in a dialog.
+func (rv *responseView) openPDF() {
+	if rv.fullBody == nil {
+		return
+	}
+	go func() {
+		f, err := os.CreateTemp("", "yon-response-*.pdf")
+		if err == nil {
+			_, err = f.Write(rv.fullBody)
+			cerr := f.Close()
+			if err == nil {
+				err = cerr
+			}
+		}
+		if err == nil {
+			err = updater.OpenFile(f.Name())
+		}
+		if err != nil {
+			fyne.Do(func() { dialog.ShowError(err, rv.parent) })
+		}
+	}()
 }
 
 // saveToFile writes the full (un-truncated) body to a user-chosen file via a
