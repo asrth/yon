@@ -191,4 +191,5 @@ WebSocket / SSE.
 
 ## License
 
-MIT
+MIT © 2026 **ADVANCED SOFTWARE AND ROBOTICS CO., LTD.**
+Contact: [contact@asr.co.th](mailto:contact@asr.co.th)
