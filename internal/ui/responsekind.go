@@ -142,6 +142,82 @@ func hasImageMagic(body []byte) bool {
 	return false
 }
 
+// responseDefaultFilename returns the suggested save-as filename for a response
+// body, picked from what the body actually is: "response.<ext>" for an image
+// (the extension matching the concrete image format), "response.pdf" for a PDF,
+// and "response.txt" for everything else. It is pure + Fyne-free so both the
+// save dialogs and unit tests can call it directly.
+func responseDefaultFilename(contentType string, body []byte) string {
+	switch classifyBody(contentType, body) {
+	case bodyKindImage:
+		return "response." + imageExtension(contentType, body)
+	case bodyKindPDF:
+		return "response.pdf"
+	default:
+		return "response.txt"
+	}
+}
+
+// imageExtension returns the bare file extension (no dot) for an image body —
+// "png", "jpg", "gif", "webp" or "bmp". It prefers the Content-Type subtype
+// (image/jpeg → jpg, image/png → png, …) and falls back to magic-byte sniffing
+// when the type is generic/absent or an image subtype with no obvious mapping
+// (e.g. image/svg+xml, which has no magic). An unrecognisable image defaults to
+// "png". This is only meaningful for bodies classifyBody reports as
+// bodyKindImage; callers gate on that.
+func imageExtension(contentType string, body []byte) string {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+
+	// 1. Map a concrete image/* subtype.
+	if strings.HasPrefix(ct, "image/") {
+		switch ct {
+		case "image/png":
+			return "png"
+		case "image/jpeg", "image/jpg":
+			return "jpg"
+		case "image/gif":
+			return "gif"
+		case "image/webp":
+			return "webp"
+		case "image/bmp", "image/x-bmp", "image/x-ms-bmp":
+			return "bmp"
+		case "image/svg+xml":
+			return "svg"
+		case "image/tiff":
+			return "tif"
+		case "image/avif":
+			return "avif"
+		case "image/x-icon", "image/vnd.microsoft.icon":
+			return "ico"
+		}
+		// An image/* subtype we still don't map: fall through to magic, then to
+		// the png default.
+	}
+
+	// 2. Sniff the magic bytes (covers a generic/absent type or an unmapped
+	// subtype that still carries a known signature).
+	switch {
+	case bytes.HasPrefix(body, []byte("\x89PNG\r\n\x1a\n")):
+		return "png"
+	case bytes.HasPrefix(body, []byte("\xFF\xD8\xFF")):
+		return "jpg"
+	case bytes.HasPrefix(body, []byte("GIF87a")), bytes.HasPrefix(body, []byte("GIF89a")):
+		return "gif"
+	case len(body) >= 12 &&
+		bytes.HasPrefix(body, []byte("RIFF")) &&
+		bytes.Equal(body[8:12], []byte("WEBP")):
+		return "webp"
+	case bytes.HasPrefix(body, []byte("BM")):
+		return "bmp"
+	}
+
+	// 3. Unknown image subtype with no recognisable magic (e.g. SVG): default png.
+	return "png"
+}
+
 // imageDimensions returns the pixel width and height of an image body without
 // fully decoding it, using image.DecodeConfig with the registered PNG/JPEG/GIF
 // decoders. ok is false when the body is not a decodable image — including WebP

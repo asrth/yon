@@ -193,6 +193,24 @@ func TestClassifyBody_GenericTypeStillSniffs(t *testing.T) {
 	}
 }
 
+// TestResponseDefaultFilename_VectorImageSubtypes pins the extension for image
+// subtypes that carry no byte signature (SVG, TIFF, AVIF, ICO): the body is
+// still classified an image via its image/* Content-Type, and the suffix follows
+// the subtype rather than defaulting to png.
+func TestResponseDefaultFilename_VectorImageSubtypes(t *testing.T) {
+	for _, c := range []struct{ ct, want string }{
+		{"image/svg+xml", "response.svg"},
+		{"image/tiff", "response.tif"},
+		{"image/avif", "response.avif"},
+		{"image/x-icon", "response.ico"},
+		{"image/vnd.microsoft.icon", "response.ico"},
+	} {
+		if got := responseDefaultFilename(c.ct, []byte("<svg/>")); got != c.want {
+			t.Errorf("responseDefaultFilename(%q) = %q, want %q", c.ct, got, c.want)
+		}
+	}
+}
+
 // --- imageDimensions: correct WxH for std-lib formats, ok=false otherwise ---
 
 func TestImageDimensions_PNGJPEGGIF(t *testing.T) {
