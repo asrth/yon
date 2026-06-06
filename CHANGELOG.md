@@ -4,6 +4,14 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-06-06
+
+### Fixed
+- A response with a very long line (e.g. a JWT token) no longer forces the
+  window wider with no way to shrink it back ([#32]) — the response Body,
+  Headers and Tests panes (and the pop-out window) now scroll horizontally, so a
+  long line scrolls inside the pane and the window's minimum size stays bounded.
+
 ## [1.4.0] - 2026-06-06
 
 ### Added
@@ -424,3 +432,4 @@ First stable release. New home: the project moved to
 [#16]: https://github.com/asrth/yon/issues/16
 [#24]: https://github.com/asrth/yon/issues/24
 [#27]: https://github.com/asrth/yon/issues/27
+[#32]: https://github.com/asrth/yon/issues/32
