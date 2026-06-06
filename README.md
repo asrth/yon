@@ -185,9 +185,11 @@ The core is UI-free and fully testable; Fyne lives only in the front end.
 
 ## Roadmap (post-v1)
 
-Import from **OpenAPI** and `.http` files · **form-data & multipart** bodies ·
-**OAuth 2.0 / API-key** auth · pre-request & post-response **scripting** ·
-WebSocket / SSE.
+Import from `.http` files · **form-data & multipart** bodies ·
+[**OAuth 2.0** auth](https://github.com/asrth/yon/issues/30) · pre-request &
+post-response **scripting** · WebSocket / SSE.
+
+(Import from **OpenAPI / Swagger** shipped in v1.4.0.)
 
 ## License
 
