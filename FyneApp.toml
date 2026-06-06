@@ -2,5 +2,5 @@
   Icon = "internal/ui/icon.png"
   Name = "Yon"
   ID = "th.co.asr.yon"
-  Version = "1.1.1"
-  Build = 32
+  Version = "1.2.0"
+  Build = 33
