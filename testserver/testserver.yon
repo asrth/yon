@@ -20,8 +20,32 @@
   "activeEnvironment": "Local",
   "folders": [
     {
+      "id": "fmethods",
+      "name": "Methods & Echo"
+    },
+    {
+      "id": "fauth",
+      "name": "Auth (Bearer / Basic)"
+    },
+    {
+      "id": "fstatus",
+      "name": "Status, Redirect & Overrides"
+    },
+    {
+      "id": "fformats",
+      "name": "Body & Formats (JSON / XML / HTML / SOAP)"
+    },
+    {
+      "id": "fbig",
+      "name": "Large & Slow (truncation / cancel)"
+    },
+    {
+      "id": "fmedia",
+      "name": "Media — image & PDF (#16)"
+    },
+    {
       "id": "ftestchain",
-      "name": "Tests \u0026 Chaining (new)"
+      "name": "Tests & Chaining"
     }
   ],
   "requests": [
@@ -58,7 +82,8 @@
       },
       "body": {
         "type": "none"
-      }
+      },
+      "folderId": "fmethods"
     },
     {
       "name": "POST — JSON body",
@@ -70,7 +95,8 @@
       "body": {
         "type": "json",
         "content": "{\n  \"hello\": \"yon\",\n  \"n\": 42,\n  \"tags\": [\"http\", \"offline\"]\n}"
-      }
+      },
+      "folderId": "fmethods"
     },
     {
       "name": "PUT — JSON body",
@@ -82,7 +108,8 @@
       "body": {
         "type": "json",
         "content": "{ \"id\": 7, \"name\": \"updated\" }"
-      }
+      },
+      "folderId": "fmethods"
     },
     {
       "name": "DELETE",
@@ -93,31 +120,8 @@
       },
       "body": {
         "type": "none"
-      }
-    },
-    {
-      "name": "Bearer auth (inherits collection token)",
-      "method": "GET",
-      "url": "{{baseUrl}}/bearer",
-      "auth": {
-        "kind": "inherit"
       },
-      "body": {
-        "type": "none"
-      }
-    },
-    {
-      "name": "Basic auth (overrides collection)",
-      "method": "GET",
-      "url": "{{baseUrl}}/basic-auth/alice/secret",
-      "auth": {
-        "kind": "basic",
-        "username": "alice",
-        "password": "secret"
-      },
-      "body": {
-        "type": "none"
-      }
+      "folderId": "fmethods"
     },
     {
       "name": "Headers echo",
@@ -140,7 +144,47 @@
       },
       "body": {
         "type": "none"
-      }
+      },
+      "folderId": "fmethods"
+    },
+    {
+      "name": "PATCH — echo method",
+      "method": "PATCH",
+      "url": "{{baseUrl}}/anything",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "json",
+        "content": "{\n  \"op\": \"replace\",\n  \"value\": 7\n}"
+      },
+      "folderId": "fmethods"
+    },
+    {
+      "name": "Bearer auth (inherits collection token)",
+      "method": "GET",
+      "url": "{{baseUrl}}/bearer",
+      "auth": {
+        "kind": "inherit"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fauth"
+    },
+    {
+      "name": "Basic auth (overrides collection)",
+      "method": "GET",
+      "url": "{{baseUrl}}/basic-auth/alice/secret",
+      "auth": {
+        "kind": "basic",
+        "username": "alice",
+        "password": "secret"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fauth"
     },
     {
       "name": "Status 404 (orange)",
@@ -151,7 +195,8 @@
       },
       "body": {
         "type": "none"
-      }
+      },
+      "folderId": "fstatus"
     },
     {
       "name": "Status 500 (red)",
@@ -162,7 +207,8 @@
       },
       "body": {
         "type": "none"
-      }
+      },
+      "folderId": "fstatus"
     },
     {
       "name": "Redirect → /get (follows)",
@@ -173,10 +219,102 @@
       },
       "body": {
         "type": "none"
-      }
+      },
+      "folderId": "fstatus"
     },
     {
-      "name": "Large body (\u003e 256 KB, truncates)",
+      "name": "Options — don't follow the redirect (per-request)",
+      "method": "GET",
+      "url": "{{baseUrl}}/redirect",
+      "auth": {
+        "kind": "inherit"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fstatus",
+      "options": {
+        "followRedirects": false
+      },
+      "assertions": [
+        {
+          "source": "status",
+          "op": "equals",
+          "expected": "302",
+          "enabled": true
+        },
+        {
+          "source": "header",
+          "expr": "Location",
+          "op": "contains",
+          "expected": "/get",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "name": "Pretty JSON (syntax colour)",
+      "method": "GET",
+      "url": "{{baseUrl}}/json",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fformats"
+    },
+    {
+      "name": "GET — XML response",
+      "method": "GET",
+      "url": "{{baseUrl}}/xml",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fformats"
+    },
+    {
+      "name": "POST — XML body",
+      "method": "POST",
+      "url": "{{baseUrl}}/xml",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "xml",
+        "content": "<order id=\"1001\"><item sku=\"A1\">Widget</item><item sku=\"B2\">Gadget</item></order>"
+      },
+      "folderId": "fformats"
+    },
+    {
+      "name": "GET — HTML page",
+      "method": "GET",
+      "url": "{{baseUrl}}/html",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fformats"
+    },
+    {
+      "name": "GET — SOAP envelope",
+      "method": "GET",
+      "url": "{{baseUrl}}/soap",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fformats"
+    },
+    {
+      "name": "Large body (> 256 KB, truncates)",
       "method": "GET",
       "url": "{{baseUrl}}/large",
       "auth": {
@@ -184,7 +322,8 @@
       },
       "body": {
         "type": "none"
-      }
+      },
+      "folderId": "fbig"
     },
     {
       "name": "Slow 10s (test Cancel / timeout)",
@@ -202,75 +341,107 @@
       },
       "body": {
         "type": "none"
-      }
+      },
+      "folderId": "fbig"
     },
     {
-      "name": "Pretty JSON (syntax colour)",
+      "name": "PNG image (inline preview)",
       "method": "GET",
-      "url": "{{baseUrl}}/json",
+      "url": "{{baseUrl}}/image/png",
       "auth": {
         "kind": "none"
       },
       "body": {
         "type": "none"
-      }
+      },
+      "folderId": "fmedia"
     },
     {
-      "name": "GET — XML response",
+      "name": "JPEG image (inline preview)",
       "method": "GET",
-      "url": "{{baseUrl}}/xml",
+      "url": "{{baseUrl}}/image/jpeg",
       "auth": {
         "kind": "none"
       },
       "body": {
         "type": "none"
-      }
-    },
-    {
-      "name": "POST — XML body",
-      "method": "POST",
-      "url": "{{baseUrl}}/xml",
-      "auth": {
-        "kind": "none"
       },
-      "body": {
-        "type": "xml",
-        "content": "\u003corder id=\"1001\"\u003e\u003citem sku=\"A1\"\u003eWidget\u003c/item\u003e\u003citem sku=\"B2\"\u003eGadget\u003c/item\u003e\u003c/order\u003e"
-      }
+      "folderId": "fmedia"
     },
     {
-      "name": "GET — HTML page",
+      "name": "GIF image (inline preview)",
       "method": "GET",
-      "url": "{{baseUrl}}/html",
+      "url": "{{baseUrl}}/image/gif",
       "auth": {
         "kind": "none"
       },
       "body": {
         "type": "none"
-      }
+      },
+      "folderId": "fmedia"
     },
     {
-      "name": "GET — SOAP envelope",
+      "name": "PNG as octet-stream (magic-byte sniff)",
       "method": "GET",
-      "url": "{{baseUrl}}/soap",
+      "url": "{{baseUrl}}/image/octet",
       "auth": {
         "kind": "none"
       },
       "body": {
         "type": "none"
-      }
+      },
+      "folderId": "fmedia"
     },
     {
-      "name": "PATCH — echo method",
-      "method": "PATCH",
-      "url": "{{baseUrl}}/anything",
+      "name": "PDF (Save… / Open panel)",
+      "method": "GET",
+      "url": "{{baseUrl}}/pdf",
       "auth": {
         "kind": "none"
       },
       "body": {
-        "type": "json",
-        "content": "{\n  \"op\": \"replace\",\n  \"value\": 7\n}"
-      }
+        "type": "none"
+      },
+      "folderId": "fmedia"
+    },
+    {
+      "name": "PDF as octet-stream (magic-byte sniff)",
+      "method": "GET",
+      "url": "{{baseUrl}}/pdf/octet",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fmedia"
+    },
+    {
+      "name": "Text starting \"BM\" — must stay text, not an image",
+      "method": "GET",
+      "url": "{{baseUrl}}/text-bm",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fmedia",
+      "assertions": [
+        {
+          "source": "status",
+          "op": "equals",
+          "expected": "200",
+          "enabled": true
+        },
+        {
+          "source": "header",
+          "expr": "Content-Type",
+          "op": "contains",
+          "expected": "text/plain",
+          "enabled": true
+        }
+      ]
     },
     {
       "name": "Assertions — check the JSON response",
@@ -363,7 +534,7 @@
     {
       "name": "Chain — use {{userId}} captured above (step 2 of 2)",
       "method": "GET",
-      "url": "{{baseUrl}}/get?user={{userId}}\u0026app={{appName}}",
+      "url": "{{baseUrl}}/get?user={{userId}}&app={{appName}}",
       "auth": {
         "kind": "inherit"
       },
@@ -390,36 +561,6 @@
           "expr": "$.query.app",
           "op": "equals",
           "expected": "Yon",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "name": "Options — don't follow the redirect (per-request)",
-      "method": "GET",
-      "url": "{{baseUrl}}/redirect",
-      "auth": {
-        "kind": "inherit"
-      },
-      "body": {
-        "type": "none"
-      },
-      "folderId": "ftestchain",
-      "options": {
-        "followRedirects": false
-      },
-      "assertions": [
-        {
-          "source": "status",
-          "op": "equals",
-          "expected": "302",
-          "enabled": true
-        },
-        {
-          "source": "header",
-          "expr": "Location",
-          "op": "contains",
-          "expected": "/get",
           "enabled": true
         }
       ]
