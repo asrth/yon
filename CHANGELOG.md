@@ -4,6 +4,22 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-06
+
+### Added
+- **Image & PDF response previews** ([#16]) — when a response is an image
+  (`image/*`, or detected from its magic bytes), Yon renders it inline, scaled to
+  fit, with the pixel dimensions in the response meta line; **Raw** still shows the
+  exact bytes. A **PDF** response (`application/pdf` or a `%PDF-` signature) shows a
+  panel with **Save…** and **Open** (Open hands the file to your OS viewer). No PDF
+  renderer or third-party dependency is added. An explicit textual `Content-Type` is
+  always trusted, so a text body that merely starts with `BM`/`GIF8`/`%PDF-` is never
+  mistaken for a binary.
+
+### Changed
+- **Tunnels…** moved from the *Collection* menu to the **View** menu ([#15]), next
+  to Variables and Request Log — it opens a window, like the other View items.
+
 ## [1.1.1] - 2026-06-05
 
 ### Fixed
@@ -383,13 +399,5 @@ First stable release. New home: the project moved to
 [#2]: https://github.com/asrth/yon/issues/2
 [#8]: https://github.com/asrth/yon/issues/8
 [#11]: https://github.com/asrth/yon/issues/11
-[#21]: https://github.com/ultramcu/yon/issues/21
-[#22]: https://github.com/ultramcu/yon/issues/22
-[#23]: https://github.com/ultramcu/yon/issues/23
-[#24]: https://github.com/ultramcu/yon/issues/24
-[#25]: https://github.com/ultramcu/yon/issues/25
-[#26]: https://github.com/ultramcu/yon/issues/26
-[#27]: https://github.com/ultramcu/yon/issues/27
-[#28]: https://github.com/ultramcu/yon/issues/28
-[#29]: https://github.com/ultramcu/yon/issues/29
-[#30]: https://github.com/ultramcu/yon/issues/30
+[#15]: https://github.com/asrth/yon/issues/15
+[#16]: https://github.com/asrth/yon/issues/16
