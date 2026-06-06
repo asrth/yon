@@ -10,6 +10,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log"
 	"net/http"
@@ -54,6 +59,27 @@ func newMux() *http.ServeMux {
 	mux.HandleFunc("/xml", xmlEcho)
 	mux.HandleFunc("/html", htmlPage)
 	mux.HandleFunc("/soap", soapEnvelope)
+
+	// Image & PDF preview endpoints (issue #16). The images and PDF are generated
+	// at runtime so the testserver stays stdlib-only with no checked-in binaries.
+	mux.HandleFunc("/image/png", imageHandler("png", "image/png"))
+	mux.HandleFunc("/image/jpeg", imageHandler("jpeg", "image/jpeg"))
+	mux.HandleFunc("/image/gif", imageHandler("gif", "image/gif"))
+	// A PNG served as application/octet-stream — exercises magic-byte sniffing
+	// (the server gives no useful type, Yon detects the image from its bytes).
+	mux.HandleFunc("/image/octet", imageHandler("png", "application/octet-stream"))
+	mux.HandleFunc("/pdf", pdfHandler("application/pdf"))
+	mux.HandleFunc("/pdf/octet", pdfHandler("application/octet-stream"))
+	// A plain-text body that begins with "BM" (BMP's signature). It MUST render as
+	// text, not a broken image — the regression behind the #16 detection fix:
+	// an explicit textual Content-Type is trusted and never magic-sniffed.
+	mux.HandleFunc("/text-bm", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("X-Yon-Testserver", "1")
+		_, _ = io.WriteString(w, "BMW recall notice: please return your vehicle.\n"+
+			"This is plain text that begins with \"BM\" and must NOT be shown as an image.")
+	})
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -66,6 +92,8 @@ func newMux() *http.ServeMux {
 				"/basic-auth/{user}/{pass}", "/bearer", "/status/{code}",
 				"/redirect", "/large", "/slow?seconds=N", "/json",
 				"/xml", "/html", "/soap",
+				"/image/png", "/image/jpeg", "/image/gif", "/image/octet",
+				"/pdf", "/pdf/octet", "/text-bm",
 			},
 			"credentials": map[string]string{
 				"bearer": demoBearer, "basicUser": demoUser, "basicPass": demoPassword,
@@ -194,6 +222,86 @@ func soapEnvelope(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.Header().Set("X-Yon-Testserver", "1")
 	_, _ = io.WriteString(w, sampleSOAP)
+}
+
+// imageHandler returns a handler that writes a freshly-rendered gradient image in
+// the given format ("png" / "jpeg" / "gif") under contentType. Pass an
+// image content-type to test the authoritative path, or "application/octet-stream"
+// to test magic-byte sniffing of a mislabelled image.
+func imageHandler(format, contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("X-Yon-Testserver", "1")
+		_, _ = w.Write(sampleImage(format))
+	}
+}
+
+// sampleImage renders a 240×160 gradient test image encoded as PNG, JPEG or GIF.
+func sampleImage(format string) []byte {
+	const w, h = 240, 160
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{
+				R: uint8(x * 255 / w),
+				G: uint8(y * 255 / h),
+				B: uint8((x + y) * 255 / (w + h)),
+				A: 0xff,
+			})
+		}
+	}
+	var buf bytes.Buffer
+	switch format {
+	case "jpeg":
+		_ = jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90})
+	case "gif":
+		_ = gif.Encode(&buf, img, nil)
+	default:
+		_ = png.Encode(&buf, img)
+	}
+	return buf.Bytes()
+}
+
+// pdfHandler returns a handler that writes a minimal valid one-page PDF under
+// contentType (application/pdf, or application/octet-stream to test sniffing).
+func pdfHandler(contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("X-Yon-Testserver", "1")
+		_, _ = w.Write(minimalPDF())
+	}
+}
+
+// minimalPDF builds a tiny but structurally valid one-page PDF (header, five
+// objects, a cross-reference table with correct byte offsets, trailer) so a real
+// OS viewer opens it from Yon's PDF panel. Generated rather than checked in to
+// keep the testserver dependency- and binary-free.
+func minimalPDF() []byte {
+	stream := "BT /F1 24 Tf 36 96 Td (Yon testserver PDF) Tj ET"
+	objs := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 144] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream),
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n")
+	offsets := make([]int, len(objs))
+	for i, body := range objs {
+		offsets[i] = buf.Len()
+		fmt.Fprintf(&buf, "%d 0 obj\n%s\nendobj\n", i+1, body)
+	}
+	xrefStart := buf.Len()
+	fmt.Fprintf(&buf, "xref\n0 %d\n", len(objs)+1)
+	buf.WriteString("0000000000 65535 f \n")
+	for _, off := range offsets {
+		fmt.Fprintf(&buf, "%010d 00000 n \n", off)
+	}
+	fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n",
+		len(objs)+1, xrefStart)
+	return buf.Bytes()
 }
 
 const sampleXML = `<?xml version="1.0" encoding="UTF-8"?><!-- Yon testserver sample catalog --><catalog><book id="bk101" xml:lang="en"><author>Ada Lovelace</author><title>Notes on the Analytical Engine</title><price currency="GBP">9.75</price><tags><tag>history</tag><tag>computing</tag></tags></book><book id="bk102" xml:lang="th"><author>สมชาย ใจดี</author><title>HTTP ฉบับโยน</title><price currency="THB">350</price></book></catalog>`

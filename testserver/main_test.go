@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 )
 
 // newTestServer mounts the real mux on an httptest server and returns it plus a
@@ -246,6 +252,108 @@ func TestSOAP_ReturnsNamespacedEnvelope(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("SOAP body missing %q:\n%s", want, body)
 		}
+	}
+}
+
+// TestImageEndpoints_DecodeWithCorrectType confirms each image endpoint serves a
+// real, decodable image under the expected Content-Type (the authoritative path
+// Yon's classifyBody uses), at the advertised 240×160 size.
+func TestImageEndpoints_DecodeWithCorrectType(t *testing.T) {
+	srv, c := newTestServer(t)
+	cases := []struct {
+		path, wantCT, wantFormat string
+	}{
+		{"/image/png", "image/png", "png"},
+		{"/image/jpeg", "image/jpeg", "jpeg"},
+		{"/image/gif", "image/gif", "gif"},
+	}
+	for _, tc := range cases {
+		resp, err := c.Get(srv.URL + tc.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tc.path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if ct := resp.Header.Get("Content-Type"); ct != tc.wantCT {
+			t.Errorf("%s Content-Type = %q, want %q", tc.path, ct, tc.wantCT)
+		}
+		cfg, format, err := image.DecodeConfig(bytes.NewReader(body))
+		if err != nil {
+			t.Errorf("%s: image.DecodeConfig: %v", tc.path, err)
+			continue
+		}
+		if format != tc.wantFormat {
+			t.Errorf("%s decoded as %q, want %q", tc.path, format, tc.wantFormat)
+		}
+		if cfg.Width != 240 || cfg.Height != 160 {
+			t.Errorf("%s = %dx%d, want 240x160", tc.path, cfg.Width, cfg.Height)
+		}
+	}
+}
+
+// TestImageOctet_IsDecodablePNGUnderGenericType serves a PNG as
+// application/octet-stream — the magic-byte-sniffing path. The body must still be
+// a decodable PNG even though the type gives nothing away.
+func TestImageOctet_IsDecodablePNGUnderGenericType(t *testing.T) {
+	srv, c := newTestServer(t)
+	resp, err := c.Get(srv.URL + "/image/octet")
+	if err != nil {
+		t.Fatalf("GET /image/octet: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want application/octet-stream", ct)
+	}
+	if _, format, err := image.DecodeConfig(bytes.NewReader(body)); err != nil || format != "png" {
+		t.Errorf("octet body decode: format=%q err=%v, want png/nil", format, err)
+	}
+}
+
+// TestPDFEndpoints_ValidPDF checks both PDF endpoints return a structurally sane
+// PDF: the %PDF- header, an %%EOF trailer, and a startxref. (A malformed PDF
+// would not open from Yon's PDF panel.)
+func TestPDFEndpoints_ValidPDF(t *testing.T) {
+	srv, c := newTestServer(t)
+	cases := []struct{ path, wantCT string }{
+		{"/pdf", "application/pdf"},
+		{"/pdf/octet", "application/octet-stream"},
+	}
+	for _, tc := range cases {
+		resp, err := c.Get(srv.URL + tc.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tc.path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if ct := resp.Header.Get("Content-Type"); ct != tc.wantCT {
+			t.Errorf("%s Content-Type = %q, want %q", tc.path, ct, tc.wantCT)
+		}
+		if !bytes.HasPrefix(body, []byte("%PDF-")) {
+			t.Errorf("%s missing %%PDF- header", tc.path)
+		}
+		if !bytes.Contains(body, []byte("startxref")) || !bytes.Contains(body, []byte("%%EOF")) {
+			t.Errorf("%s missing startxref/%%%%EOF trailer", tc.path)
+		}
+	}
+}
+
+// TestTextBM_StaysTextNotImage pins the #16 regression at the wire level: the
+// body begins with "BM" (BMP's signature) but is served as text/plain, so Yon
+// must keep it text. Here we assert the server contract the fix relies on.
+func TestTextBM_StaysTextNotImage(t *testing.T) {
+	srv, c := newTestServer(t)
+	resp, err := c.Get(srv.URL + "/text-bm")
+	if err != nil {
+		t.Fatalf("GET /text-bm: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("Content-Type = %q, want text/plain", ct)
+	}
+	if !bytes.HasPrefix(body, []byte("BM")) {
+		t.Errorf("body should start with the BMP-signature prefix \"BM\"; got %q", body[:min(8, len(body))])
 	}
 }
 
