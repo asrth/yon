@@ -1265,6 +1265,7 @@ func (w *Window) buildMainMenu() *fyne.MainMenu {
 		fyne.NewMenuItem("New", func() { w.app.NewCollectionWindow() }),
 		fyne.NewMenuItem("Open…", w.open),
 		fyne.NewMenuItem("Import Collection (JSON)…", w.importCollection),
+		fyne.NewMenuItem("Import OpenAPI / Swagger…", w.importOpenAPI),
 		fyne.NewMenuItem("New Request from cURL…", w.newRequestFromCurl),
 		w.recentMenuItem(),
 		fyne.NewMenuItemSeparator(),

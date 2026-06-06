@@ -34,6 +34,16 @@ into one folder per area (no loose top-level requests):
 > request (in the right folder) to `testserver.yon`, so this stays a complete,
 > always-current manual-test harness.
 
+## OpenAPI / Swagger import samples
+
+Sample spec files for **File ▸ Import OpenAPI / Swagger…** (these are example
+*inputs* to import, not HTTP endpoints):
+
+| File | Exercises |
+|---|---|
+| `openapi/petstore-3.0.yaml` | OpenAPI **3.0** (YAML) — tags→folders, a `{petId}` path param, a `$ref` JSON body, bearer security, a server URL |
+| `openapi/example-2.0.json` | Swagger **2.0** (JSON) — `host`+`basePath`+`schemes`→`{{baseUrl}}`, a `$ref` body, an `apiKey` header scheme |
+
 ## Endpoints
 
 | Endpoint | Purpose |
