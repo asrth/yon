@@ -23,6 +23,18 @@ func nativeOpenYon(title string) (string, bool, error) {
 	return nativeResult(zenity.SelectFile(zenity.Title(title), yonFilter))
 }
 
+// specFilter selects OpenAPI 3.0 / Swagger 2.0 spec files (YAML or JSON) in the
+// native open dialog.
+var specFilter = zenity.FileFilters{
+	{Name: "OpenAPI / Swagger spec", Patterns: []string{"*.yaml", "*.yml", "*.json"}, CaseFold: true},
+}
+
+// nativeOpenSpec shows a native open dialog filtered to OpenAPI/Swagger specs
+// (.yaml/.yml/.json). It returns (path, ok, err) like the other native wrappers.
+func nativeOpenSpec(title string) (string, bool, error) {
+	return nativeResult(zenity.SelectFile(zenity.Title(title), specFilter))
+}
+
 // nativeSaveYon shows a native save dialog (filtered to .yon) defaulting to name.
 func nativeSaveYon(title, name string) (string, bool, error) {
 	return nativeResult(zenity.SelectFileSave(
