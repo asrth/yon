@@ -262,7 +262,7 @@ func newResponseView(parent fyne.Window) *responseView {
 	// Body content: the coloured TextGrid (small bodies, scrolled) stacked with
 	// the lightweight List (large bodies). renderBody shows exactly one. UNCHANGED
 	// perf architecture — only its surrounding layout differs.
-	rv.bodyScroll = container.NewVScroll(rv.bodyGrid)
+	rv.bodyScroll = container.NewScroll(rv.bodyGrid)
 
 	// The image preview and PDF panel (issue #16) are built lazily and inserted
 	// into bodyStack only while they are the active viewer, then removed again —
@@ -275,11 +275,11 @@ func newResponseView(parent fyne.Window) *responseView {
 	// tab; the response HEADERS (key cyan / value) move into the Headers tab.
 	rv.respTabs = newSegTabs()
 	rv.respTabs.Append("Body", rv.bodyStack)
-	rv.headersSeg = rv.respTabs.Append("Headers", container.NewVScroll(rv.headersGrid))
+	rv.headersSeg = rv.respTabs.Append("Headers", container.NewScroll(rv.headersGrid))
 	// Tests tab: a scrollable VBox that setTestResults fills with the assertion
 	// pass/fail rows + captured values + a summary line. Starts empty/neutral.
 	rv.testsBox = container.NewVBox()
-	rv.testsSeg = rv.respTabs.Append("Tests", container.NewVScroll(rv.testsBox))
+	rv.testsSeg = rv.respTabs.Append("Tests", container.NewScroll(rv.testsBox))
 
 	rv.container = container.NewBorder(header, nil, nil, nil, rv.respTabs.object())
 
@@ -1084,7 +1084,7 @@ func (rv *responseView) showPopout() {
 	// Find view: a TextGrid that supports match highlighting, shown only while
 	// find is open. It overlays the entry in a Stack; one is hidden at a time.
 	grid := widget.NewTextGrid()
-	gridScroll := container.NewVScroll(grid)
+	gridScroll := container.NewScroll(grid)
 	gridScroll.Hide()
 
 	var search gridSearch
