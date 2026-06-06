@@ -4,6 +4,16 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-06-06
+
+### Added
+- **Right-click an image response to save it** ([#24]) — the inline image preview
+  now has a **Save image…** context menu that writes the full image to a file.
+- **Correct default filenames on save** ([#24]) — *Save Output As…*, the PDF
+  panel's *Save…*, and the new image save all suggest a name with the right
+  extension for the response (`response.png` / `.jpg` / `.gif` / `.webp` / `.bmp`
+  / `.pdf`, falling back to `.txt`), instead of always `response.txt`.
+
 ## [1.2.0] - 2026-06-06
 
 ### Added
@@ -401,3 +411,4 @@ First stable release. New home: the project moved to
 [#11]: https://github.com/asrth/yon/issues/11
 [#15]: https://github.com/asrth/yon/issues/15
 [#16]: https://github.com/asrth/yon/issues/16
+[#24]: https://github.com/asrth/yon/issues/24
