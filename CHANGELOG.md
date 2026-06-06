@@ -4,6 +4,17 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-06
+
+### Added
+- **Import OpenAPI / Swagger** ([#27]) — **File ▸ Import OpenAPI / Swagger…**
+  reads an OpenAPI 3.x or Swagger 2.0 document (YAML or JSON) and builds a
+  collection: operations become requests grouped by tag into folders, the
+  server URL becomes a `{{baseUrl}}` variable, parameters and an example JSON
+  body are filled in, and security schemes map to auth (Bearer/Basic; an API key
+  becomes a header/query parameter). Anything unsupported is listed in an import
+  report.
+
 ## [1.3.0] - 2026-06-06
 
 ### Added
@@ -412,3 +423,4 @@ First stable release. New home: the project moved to
 [#15]: https://github.com/asrth/yon/issues/15
 [#16]: https://github.com/asrth/yon/issues/16
 [#24]: https://github.com/asrth/yon/issues/24
+[#27]: https://github.com/asrth/yon/issues/27
