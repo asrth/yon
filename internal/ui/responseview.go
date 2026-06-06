@@ -876,7 +876,11 @@ func (rv *responseView) showImage() {
 	rv.bodyImage = canvas.NewImageFromResource(fyne.NewStaticResource("response", rv.fullBody))
 	rv.bodyImage.FillMode = canvas.ImageFillContain
 	rv.bodyImage.SetMinSize(fyne.NewSize(120, 120))
-	rv.bodyImageScroll = container.NewScroll(container.NewCenter(rv.bodyImage))
+	// Wrap the preview so a right-click offers "Save image…". The wrapper renders
+	// exactly rv.bodyImage (widget.NewSimpleRenderer), so the *canvas.Image stays
+	// reachable by a tree walk — issue #16's visibleImages still finds it.
+	wrapped := newImagePreview(rv.bodyImage, rv.saveImage)
+	rv.bodyImageScroll = container.NewScroll(container.NewCenter(wrapped))
 
 	rv.bodyStack.Add(rv.bodyImageScroll)
 	rv.bodyStack.Refresh()
@@ -941,7 +945,8 @@ func (rv *responseView) savePDF() {
 		return
 	}
 	go func() {
-		path, ok, err := nativeSaveAny("Save PDF", "response.pdf")
+		path, ok, err := nativeSaveAny("Save PDF",
+			responseDefaultFilename(rv.contentType, rv.fullBody))
 		fyne.Do(func() {
 			switch {
 			case err != nil:
@@ -990,7 +995,35 @@ func (rv *responseView) saveToFile() {
 		return
 	}
 	go func() {
-		path, ok, err := nativeSaveAny("Save Response Body", "response.txt")
+		path, ok, err := nativeSaveAny("Save Response Body",
+			responseDefaultFilename(rv.contentType, rv.fullBody))
+		fyne.Do(func() {
+			switch {
+			case err != nil:
+				rv.saveToFileFyne()
+			case !ok:
+				// cancelled
+			default:
+				if werr := os.WriteFile(path, rv.fullBody, 0o644); werr != nil {
+					dialog.ShowError(werr, rv.parent)
+				}
+			}
+		})
+	}()
+}
+
+// saveImage writes the full image body to a user-chosen file, defaulting the
+// filename to the format-correct responseDefaultFilename (e.g. response.png /
+// response.jpg). It reuses the same native/Fyne save path as saveToFile and
+// shares its Fyne in-app fallback on a native-dialog error. Invoked from the
+// "Save image…" right-click menu on the inline image preview.
+func (rv *responseView) saveImage() {
+	if rv.fullBody == nil {
+		return
+	}
+	go func() {
+		path, ok, err := nativeSaveAny("Save Image",
+			responseDefaultFilename(rv.contentType, rv.fullBody))
 		fyne.Do(func() {
 			switch {
 			case err != nil:
@@ -1107,6 +1140,48 @@ func (rv *responseView) showPopout() {
 	win.Resize(fyne.NewSize(960, 720))
 	addFindShortcuts(win, openFind, closeFind)
 	win.Show()
+}
+
+// imagePreview wraps the inline response image (a *canvas.Image) so a right-click
+// offers a "Save image…" context menu. It renders exactly the wrapped image via
+// widget.NewSimpleRenderer, so the *canvas.Image stays a reachable child in the
+// rendered tree — issue #16's image-walk (visibleImages over rv.bodyStack) still
+// finds the preview. It is only built in showImage, so the menu never appears for
+// a text or PDF response.
+type imagePreview struct {
+	widget.BaseWidget
+	img    *canvas.Image
+	onSave func()
+}
+
+// newImagePreview builds the right-clickable wrapper around img; onSave runs when
+// the "Save image…" menu item is chosen.
+func newImagePreview(img *canvas.Image, onSave func()) *imagePreview {
+	p := &imagePreview{img: img, onSave: onSave}
+	p.ExtendBaseWidget(p)
+	return p
+}
+
+// CreateRenderer renders the wrapped image directly, keeping the *canvas.Image a
+// reachable child of the widget tree.
+func (p *imagePreview) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(p.img)
+}
+
+// TappedSecondary shows a one-item "Save image…" context menu at the click point,
+// mirroring the sidebar's right-click idiom (verbRow.TappedSecondary).
+func (p *imagePreview) TappedSecondary(e *fyne.PointEvent) {
+	items := []*fyne.MenuItem{
+		fyne.NewMenuItem("Save image…", func() {
+			if p.onSave != nil {
+				p.onSave()
+			}
+		}),
+	}
+	menu := fyne.NewMenu("", items...)
+	if c := fyne.CurrentApp().Driver().CanvasForObject(p); c != nil {
+		widget.ShowPopUpMenuAtPosition(menu, c, e.AbsolutePosition)
+	}
 }
 
 // statusColor maps an HTTP status code to its class colour.
