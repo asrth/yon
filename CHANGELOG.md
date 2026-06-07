@@ -4,6 +4,22 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-06-07
+
+### Added
+- **Store an environment inside the `.yon`** ([#35]) — the environment manager
+  has a **"Store inside .yon"** checkbox so an environment can travel inside the
+  committable collection file instead of a sibling file. A warning explains that
+  inline values (including secrets) are committed; new environments default to
+  the sibling-file storage. Toggling the checkbox migrates the environment
+  between the two (it always lives in exactly one place).
+
+### Changed
+- **Saving warns before overwriting external edits** ([#40]) — if the open
+  `.yon` was changed on disk since Yon read it (by another tool, `git`, a
+  script), Save now prompts **Overwrite / Reload / Cancel** instead of silently
+  clobbering the change.
+
 ## [1.4.2] - 2026-06-07
 
 ### Fixed
@@ -442,3 +458,5 @@ First stable release. New home: the project moved to
 [#27]: https://github.com/asrth/yon/issues/27
 [#32]: https://github.com/asrth/yon/issues/32
 [#36]: https://github.com/asrth/yon/issues/36
+[#35]: https://github.com/asrth/yon/issues/35
+[#40]: https://github.com/asrth/yon/issues/40
