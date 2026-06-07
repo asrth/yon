@@ -263,6 +263,12 @@ type Collection struct {
 	ActiveEnvironment string     `json:"activeEnvironment,omitempty"`
 	Folders           []Folder   `json:"folders,omitempty"`
 	Requests          []Request  `json:"requests,omitempty"`
+	// Environments are environments stored INLINE in the .yon file (issue #35),
+	// as opposed to the default sibling-file storage (the .environments/
+	// directory + .env). omitempty keeps a collection with no inline
+	// environments byte-identical on disk. An environment lives in exactly one
+	// place — here OR a sibling file, never both.
+	Environments []Environment `json:"environments,omitempty"`
 }
 
 // Response is the result of sending a Request. It is read-only data: status,

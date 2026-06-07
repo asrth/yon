@@ -120,11 +120,16 @@ type Window struct {
 	// startSend the first time a Capture writes a value.
 	runtimeVars map[string]string
 
-	// envs holds the environments loaded from the collection's sibling files
-	// (empty for an unsaved collection). envSelect is the sidebar-header picker
-	// that chooses the active environment; pendingEnvDeletes queues environment
-	// files to remove on the next manager Save (set by Rename/Delete).
+	// envs holds the environments loaded for the collection — the merged set of
+	// inline environments (stored in the committable .yon) and sibling-file
+	// environments (empty for an unsaved collection). inlineEnvs reports which of
+	// those names are currently stored inline, so the manager can seed its
+	// per-row "Store inside .yon" checkbox and persistEnvironments can tell which
+	// location a deleted environment lived in. envSelect is the sidebar-header
+	// picker that chooses the active environment; pendingEnvDeletes queues
+	// environment names to remove on the next manager Save (set by Rename/Delete).
 	envs              []model.Environment
+	inlineEnvs        map[string]bool
 	envSelect         *widget.Select
 	pendingEnvDeletes []string
 

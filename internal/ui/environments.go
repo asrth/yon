@@ -23,22 +23,24 @@ const noEnvironmentLabel = "No Environment"
 // Environments dialog instead of selecting an environment.
 const manageEnvironmentsLabel = "Manage Environments…"
 
-// loadEnvironments populates w.envs from the sibling environment files of the
-// backing collection. For an unsaved collection (path == "") there are no
-// sibling files, so the list is left empty. Errors are reported to the user but
-// are non-fatal: the window still opens, just without environments.
+// loadEnvironments populates w.envs with the collection's unified environment
+// set: its inline environments (stored in the committable .yon) merged with its
+// sibling-file environments, via store.CollectionEnvironments. w.inlineEnvs is
+// set to the names that are stored inline, so the manager can seed its per-row
+// "Store inside .yon" checkbox. For an unsaved collection (path == "") there are
+// no sibling files, but inline environments could still exist on the in-memory
+// collection, so the merge still runs. Errors are reported to the user but are
+// non-fatal: the window still opens, just without environments.
 func (w *Window) loadEnvironments() {
-	if w.path == "" {
-		w.envs = nil
-		return
-	}
-	envs, err := store.LoadEnvironments(w.path)
+	envs, inline, err := store.CollectionEnvironments(w.path, w.coll)
 	if err != nil {
 		dialog.ShowError(err, w.win)
-		w.envs = nil
+		w.envs = envs
+		w.inlineEnvs = inline
 		return
 	}
 	w.envs = envs
+	w.inlineEnvs = inline
 }
 
 // activeEnv returns the loaded environment whose Name matches the collection's
@@ -557,6 +559,16 @@ func (w *Window) showEnvironmentManager() {
 	copy(working, w.envs)
 	collVars := append([]model.Variable(nil), w.coll.Variables...)
 
+	// workingInline runs parallel to working: workingInline[i] is whether
+	// working[i] is stored inline in the .yon (true) or as a sibling file
+	// (false). It is seeded from w.inlineEnvs and kept aligned with working
+	// through Add/Rename/Duplicate/Delete. The detail pane's "Store inside .yon"
+	// checkbox writes the editing row's entry back into it.
+	workingInline := make([]bool, len(working))
+	for i, e := range working {
+		workingInline[i] = w.inlineEnvs[e.Name]
+	}
+
 	// entries is the list backing model: collectionEntry first, then env names.
 	entries := func() []string {
 		out := []string{collectionEntry}
@@ -569,7 +581,8 @@ func (w *Window) showEnvironmentManager() {
 	var selected int               // index into entries()
 	var table *varTable            // editor for the currently selected entry
 	var jhForm *jumpHostForm       // SSH jump-host editor (real environments only)
-	detail := container.NewStack() // holds the table (+ jump-host form)
+	var inlineCheck *widget.Check  // "Store inside .yon" toggle (real environments only)
+	detail := container.NewStack() // holds the table (+ jump-host form + inline toggle)
 	var list *widget.List
 	var rebuildDetail func()
 	var commitTable func() // flush the visible table back into working/collVars
@@ -592,6 +605,10 @@ func (w *Window) showEnvironmentManager() {
 			if jhForm != nil {
 				working[envIdx].JumpHost = jhForm.value()
 			}
+			// …and the inline-vs-sibling storage choice.
+			if inlineCheck != nil {
+				workingInline[envIdx] = inlineCheck.Checked
+			}
 		}
 	}
 
@@ -612,12 +629,38 @@ func (w *Window) showEnvironmentManager() {
 		table = newVarTable(vars, secrets)
 		if secrets {
 			// Real environment: show the variable table with the SSH jump-host
-			// editor below it.
+			// editor below it, plus the "Store inside .yon" storage toggle.
 			jhForm = newJumpHostForm(jh)
-			content := container.NewBorder(nil, jhForm.container, nil, nil, table.container)
+
+			// warning explains the data-leak risk of inline storage; it is only
+			// visible while the checkbox is checked.
+			warning := widget.NewLabelWithStyle(
+				"Stored in the .yon — its values (including secrets) will be committed if you commit the file.",
+				fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+			warning.Importance = widget.DangerImportance
+			warning.Wrapping = fyne.TextWrapWord
+
+			inlineCheck = widget.NewCheck("Store inside .yon", func(checked bool) {
+				if checked {
+					warning.Show()
+				} else {
+					warning.Hide()
+				}
+			})
+			if envIdx := selected - 1; envIdx >= 0 && envIdx < len(workingInline) {
+				inlineCheck.SetChecked(workingInline[envIdx])
+			}
+			if !inlineCheck.Checked {
+				warning.Hide()
+			}
+
+			storage := container.NewVBox(widget.NewSeparator(), inlineCheck, warning)
+			bottom := container.NewVBox(jhForm.container, storage)
+			content := container.NewBorder(nil, bottom, nil, nil, table.container)
 			detail.Objects = []fyne.CanvasObject{content}
 		} else {
 			jhForm = nil
+			inlineCheck = nil
 			detail.Objects = []fyne.CanvasObject{table.container}
 		}
 		detail.Refresh()
@@ -658,6 +701,8 @@ func (w *Window) showEnvironmentManager() {
 				}
 				commitTable()
 				working = append(working, model.Environment{Name: name})
+				// A new environment defaults to sibling storage (unchecked).
+				workingInline = append(workingInline, false)
 				selected = len(working) // new entry index in entries()
 				list.Refresh()
 				list.Select(selected)
@@ -722,6 +767,8 @@ func (w *Window) showEnvironmentManager() {
 		newName := uniqueEnvName(working[envIdx].Name, names)
 		dup := duplicateEnvironment(working[envIdx], newName)
 		working = append(working, dup)
+		// The copy inherits the source's inline-vs-sibling storage choice.
+		workingInline = append(workingInline, workingInline[envIdx])
 		selected = len(working) // new entry index in entries()
 		list.Refresh()
 		list.Select(selected)
@@ -740,14 +787,20 @@ func (w *Window) showEnvironmentManager() {
 			return
 		}
 		name := working[envIdx].Name
+		// Word the prompt for where the environment actually lives.
+		where := "removes its sibling file"
+		if envIdx < len(workingInline) && workingInline[envIdx] {
+			where = "removes it from the .yon"
+		}
 		dialog.ShowConfirm("Delete Environment",
-			"Delete environment "+name+"? This removes its sibling file on Save.",
+			"Delete environment "+name+"? This "+where+" on Save.",
 			func(yes bool) {
 				if !yes {
 					return
 				}
 				w.pendingEnvDeletes = append(w.pendingEnvDeletes, name)
 				working = append(working[:envIdx], working[envIdx+1:]...)
+				workingInline = append(workingInline[:envIdx], workingInline[envIdx+1:]...)
 				if w.coll.ActiveEnvironment == name {
 					w.coll.ActiveEnvironment = ""
 					w.markDirty()
@@ -755,6 +808,7 @@ func (w *Window) showEnvironmentManager() {
 				selected = 0
 				table = nil
 				jhForm = nil
+				inlineCheck = nil
 				editing = 0
 				list.Refresh()
 				list.Select(0)
@@ -780,38 +834,64 @@ func (w *Window) showEnvironmentManager() {
 				return
 			}
 			commitTable()
-			w.persistEnvironments(working, collVars)
+			w.persistEnvironments(working, workingInline, collVars)
 		}, w.win)
 	d.Resize(fyne.NewSize(720, 480))
 	d.Show()
 }
 
-// persistEnvironments writes the manager's edits to disk: deletes the
-// environments queued in pendingEnvDeletes, saves every working environment,
-// applies the edited collection variables (marking the collection dirty so a
-// normal Save persists them), reloads the in-memory list, and refreshes the
-// selector. Errors are reported but processing continues for the rest.
-func (w *Window) persistEnvironments(working []model.Environment, collVars []model.Variable) {
+// persistEnvironments writes the manager's edits to disk. Each surviving working
+// environment is routed by its parallel inline flag (workingInline[i]): a
+// checked "Store inside .yon" row goes to store.SetEnvironmentInline (embedded in
+// the committable .yon), an unchecked row to store.SetEnvironmentSibling (the
+// default; secrets in the gitignored .env). Both store calls migrate the
+// environment out of the other location, so toggling the checkbox on an existing
+// environment MOVES it. Environments queued in pendingEnvDeletes (from Delete or
+// the old name of a Rename) are removed from whichever location they lived in,
+// determined from w.inlineEnvs (the pre-edit storage state):
+// DeleteInlineEnvironment for an inline one, DeleteEnvironment for a sibling.
+// The edited collection variables are applied (marking the collection dirty),
+// then the in-memory list, inline-name set, and selector are refreshed. Errors
+// are reported but processing continues for the rest.
+func (w *Window) persistEnvironments(working []model.Environment, workingInline []bool, collVars []model.Variable) {
 	if w.path == "" {
 		w.promptSaveBeforeEnvironments()
 		return
 	}
 
+	// Collection variables ride along with the SetEnvironment* writes (each calls
+	// store.Save on the whole collection), so apply them before persisting envs.
+	w.coll.Variables = collVars
+
+	// Remove deleted/renamed-away environments from their prior location. A
+	// surviving environment that is being MOVED (toggled) is not in this list —
+	// the Set* call handles its migration — so this only fires for true removals.
 	for _, name := range w.pendingEnvDeletes {
-		if err := store.DeleteEnvironment(w.path, name); err != nil {
+		var err error
+		if w.inlineEnvs[name] {
+			err = store.DeleteInlineEnvironment(w.path, &w.coll, name)
+		} else {
+			err = store.DeleteEnvironment(w.path, name)
+		}
+		if err != nil {
 			dialog.ShowError(err, w.win)
 		}
 	}
 	w.pendingEnvDeletes = nil
 
-	for _, env := range working {
-		if err := store.SaveEnvironment(w.path, env); err != nil {
+	for i, env := range working {
+		inline := i < len(workingInline) && workingInline[i]
+		var err error
+		if inline {
+			err = store.SetEnvironmentInline(w.path, &w.coll, env)
+		} else {
+			err = store.SetEnvironmentSibling(w.path, &w.coll, env)
+		}
+		if err != nil {
 			dialog.ShowError(err, w.win)
 		}
 	}
 
-	// Collection variables ride along with the normal collection Save.
-	w.coll.Variables = collVars
 	w.markDirty()
 
 	w.loadEnvironments()
