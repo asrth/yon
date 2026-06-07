@@ -4,6 +4,14 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-06-07
+
+### Fixed
+- The **Variables** panel no longer stretches wide and gets stuck when a value
+  is long (e.g. a captured JWT token) ([#36]) — it now scrolls horizontally, so
+  a long value scrolls inside the panel and the window can be resized down
+  freely. (Same fix as [#32] for the response pane.)
+
 ## [1.4.1] - 2026-06-06
 
 ### Fixed
@@ -433,3 +441,4 @@ First stable release. New home: the project moved to
 [#24]: https://github.com/asrth/yon/issues/24
 [#27]: https://github.com/asrth/yon/issues/27
 [#32]: https://github.com/asrth/yon/issues/32
+[#36]: https://github.com/asrth/yon/issues/36
