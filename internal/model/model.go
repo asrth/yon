@@ -52,6 +52,9 @@ const (
 	AuthBasic AuthKind = "basic"
 	// AuthBearer is bearer-token auth using Token.
 	AuthBearer AuthKind = "bearer"
+	// AuthOAuth2 obtains a token via an OAuth 2.0 flow (issue #30) and sends it as
+	// a Bearer token; the flow is configured in Auth.OAuth2.
+	AuthOAuth2 AuthKind = "oauth2"
 )
 
 // Auth describes the authentication for a Request or Collection. Only the
@@ -62,6 +65,55 @@ type Auth struct {
 	Username string   `json:"username,omitempty"`
 	Password string   `json:"password,omitempty"`
 	Token    string   `json:"token,omitempty"`
+	// OAuth2 holds the OAuth 2.0 configuration when Kind is AuthOAuth2 (issue
+	// #30). nil + omitempty keeps an Auth that predates OAuth2 byte-identical on
+	// disk. The obtained tokens are NOT stored here — they are session/runtime
+	// state held by the OAuth token manager; the client secret is a secret that
+	// belongs in the gitignored .env, not the committed .yon.
+	OAuth2 *OAuth2Config `json:"oauth2,omitempty"`
+}
+
+// OAuth2Grant identifies which OAuth 2.0 grant flow an OAuth2Config uses.
+type OAuth2Grant string
+
+// OAuth 2.0 grant types Yon supports.
+const (
+	// GrantClientCredentials is the client_credentials grant (server-to-server,
+	// no browser): POST the token endpoint with the client id/secret.
+	GrantClientCredentials OAuth2Grant = "client_credentials"
+	// GrantAuthorizationCode is the authorization_code grant (user-delegated):
+	// open the auth URL in a browser, catch the code on a loopback redirect, and
+	// exchange it for tokens. PKCE is used when OAuth2Config.UsePKCE is set.
+	GrantAuthorizationCode OAuth2Grant = "authorization_code"
+)
+
+// OAuth2ClientAuthStyle selects how client credentials are presented to the
+// token endpoint.
+type OAuth2ClientAuthStyle string
+
+const (
+	// OAuth2ClientAuthBasic sends the client id/secret as an HTTP Basic
+	// Authorization header (the default and most widely supported).
+	OAuth2ClientAuthBasic OAuth2ClientAuthStyle = "basic"
+	// OAuth2ClientAuthBody sends client_id/client_secret as POST body params.
+	OAuth2ClientAuthBody OAuth2ClientAuthStyle = "body"
+)
+
+// OAuth2Config is the OAuth 2.0 configuration for an Auth of Kind AuthOAuth2.
+// Only the configuration lives here (and in the .yon); the ClientSecret is a
+// secret (kept out of the committed file, in .env) and the obtained tokens are
+// session state. {{variables}} are allowed in the URL/ID/scope fields.
+type OAuth2Config struct {
+	Grant        OAuth2Grant           `json:"grant"`
+	TokenURL     string                `json:"tokenUrl"`
+	AuthURL      string                `json:"authUrl,omitempty"` // authorization_code only
+	ClientID     string                `json:"clientId,omitempty"`
+	ClientSecret string                `json:"clientSecret,omitempty"` // secret → .env, not committed
+	Scopes       string                `json:"scopes,omitempty"`       // space-separated
+	Audience     string                `json:"audience,omitempty"`     // extra "audience" param when set
+	RedirectURI  string                `json:"redirectUri,omitempty"`  // authorization_code loopback, e.g. http://127.0.0.1:0/callback
+	UsePKCE      bool                  `json:"usePkce,omitempty"`      // authorization_code: PKCE S256
+	ClientAuth   OAuth2ClientAuthStyle `json:"clientAuth,omitempty"`   // "" = basic
 }
 
 // Param is a key/value pair with an Enabled flag, used for both query
