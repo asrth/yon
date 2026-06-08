@@ -126,6 +126,28 @@ type responseView struct {
 	bodyImage       *canvas.Image
 	bodyImageScroll *container.Scroll
 
+	// previewBytes is the byte slice the currently-shown image preview was built
+	// from, and the bytes its right-click "Save image…" writes (issue #37). For a
+	// real image body (issue #16) it is rv.fullBody; for a base64 image it is the
+	// DECODED image, so Save writes the decoded image, not the encoded base64 text.
+	// nil when no image is previewed. showImageBytes sets it; hideImage clears it.
+	previewBytes []byte
+
+	// base64Decoded is the base64-image opt-in state for an ambiguous bare-base64
+	// body (issue #37, base64Bare). It starts false so a new response renders as
+	// text; the "Decode as image" button flips it true to preview the decoded
+	// image, and "Show text" flips it back. setResponse/clearBody reset it so a new
+	// response starts un-decoded. It is meaningful only while renderBody sees a
+	// base64Bare body; decodeBtn is shown only then.
+	base64Decoded bool
+	decodeBtn     *widget.Button
+
+	// baseMeta is the status/time/size meta line WITHOUT any base64 decode note,
+	// so renderBody can append "· decoded from base64 · W×H" when auto-previewing a
+	// data-URI image (issue #37) and drop it again on the Raw toggle, without
+	// re-deriving duration/size. setResponse fills it; renderBody reads it.
+	baseMeta string
+
 	// bodyPDF previews a PDF response: an icon, a "PDF document · <size>" label
 	// and Save…/Open buttons. yon does not render PDF pages itself (no new deps);
 	// the panel hands the bytes to the OS via Open (updater.OpenFile to a temp
@@ -199,6 +221,13 @@ func newResponseView(parent fyne.Window) *responseView {
 	rv.popoutBtn.Importance = widget.LowImportance
 	rv.popoutBtn.Hide()
 
+	// "Decode as image" / "Show text" opt-in toggle for an ambiguous bare-base64
+	// image body (issue #37, base64Bare). Hidden until renderBody detects such a
+	// body; toggleBase64Decode flips base64Decoded and re-renders.
+	rv.decodeBtn = widget.NewButton(base64DecodeLabel, rv.toggleBase64Decode)
+	rv.decodeBtn.Importance = widget.LowImportance
+	rv.decodeBtn.Hide()
+
 	rv.noticeLabel = widget.NewLabel("")
 	rv.noticeLabel.Hide()
 
@@ -247,7 +276,7 @@ func newResponseView(parent fyne.Window) *responseView {
 	// Save (when truncated) · Copy · Pretty | Raw — a single flat row pinned right
 	// (adjacent Pretty/Raw buttons read as a segmented control).
 	right := container.New(layout.NewHBoxLayout(),
-		rv.popoutBtn, rv.saveBtn, rv.copyBtn, rv.prettyBtn, rv.rawBtn)
+		rv.decodeBtn, rv.popoutBtn, rv.saveBtn, rv.copyBtn, rv.prettyBtn, rv.rawBtn)
 	headerRow := container.NewBorder(nil, nil, left, right)
 
 	rv.find = newFindBar(
@@ -425,6 +454,10 @@ func (rv *responseView) setError(err error) {
 func (rv *responseView) setResponse(resp model.Response) {
 	rv.fullBody = resp.Body
 	rv.contentType = contentTypeOf(resp.Headers)
+	// A new response starts un-decoded: reset the base64 opt-in so a previous
+	// "Decode as image" choice never carries over (issue #37). renderBody re-shows
+	// the button if this body is itself an ambiguous bare-base64 image.
+	rv.base64Decoded = false
 	rv.copyBtn.Show()
 	rv.saveBtn.Show()
 	rv.popoutBtn.Show()
@@ -441,6 +474,9 @@ func (rv *responseView) setResponse(resp model.Response) {
 			meta += fmt.Sprintf("   ·   %d×%d", w, h)
 		}
 	}
+	// Remember the base meta so renderBody can append/drop the base64 decode note
+	// across Pretty/Raw toggles without re-deriving it (issue #37).
+	rv.baseMeta = meta
 	rv.metaLabel.SetText(meta)
 
 	rv.renderHeaders(resp.Headers)
@@ -716,7 +752,8 @@ func (rv *responseView) renderBody() {
 	// mode (so the bytes stay inspectable); a PDF always shows the PDF panel. Find
 	// keeps the text path so matches can be highlighted.
 	if !rv.findActive {
-		switch classifyBody(rv.contentType, rv.fullBody) {
+		kind := classifyBody(rv.contentType, rv.fullBody)
+		switch kind {
 		case bodyKindImage:
 			if rv.pretty {
 				rv.noticeLabel.Hide()
@@ -729,6 +766,19 @@ func (rv *responseView) renderBody() {
 			rv.showPDF()
 			return
 		}
+
+		// Issue #37: a textual body may itself be a base64-encoded image. Only run
+		// the (cheap) detection when the body isn't already a raw image/PDF, to
+		// avoid double work, and only outside Find (handled by the guard above).
+		if kind == bodyKindText {
+			if rv.renderBase64() {
+				return
+			}
+		} else {
+			rv.hideDecodeButton()
+		}
+	} else {
+		rv.hideDecodeButton()
 	}
 
 	body := rv.fullBody
@@ -826,6 +876,12 @@ func (rv *responseView) clearBody() {
 	rv.bodyList.Hide()
 	rv.hideImage()
 	rv.hidePDF()
+	// Reset the base64 opt-in and hide its button so a stale "Decode as image"
+	// affordance never lingers behind a later text/pending/error state (issue #37).
+	rv.base64Decoded = false
+	if rv.decodeBtn != nil {
+		rv.decodeBtn.Hide()
+	}
 	rv.bodyScroll.Show()
 }
 
@@ -837,6 +893,7 @@ func (rv *responseView) hideImage() {
 		rv.bodyImageScroll = nil
 	}
 	rv.bodyImage = nil
+	rv.previewBytes = nil
 }
 
 // hidePDF removes the PDF panel from the body stack.
@@ -866,6 +923,18 @@ func (rv *responseView) removeFromStack(obj fyne.CanvasObject) {
 // hideImage), so a later text/PDF response leaves no image behind. The image is
 // wrapped in a fresh static resource so canvas.Image loads the new bytes.
 func (rv *responseView) showImage() {
+	rv.showImageBytes(rv.fullBody)
+}
+
+// showImageBytes builds the image preview from b (the raw body for a real image,
+// or the DECODED bytes for a base64 image — issue #37) and makes it the visible
+// Body viewer, hiding the text viewers and removing any PDF panel. It records b
+// as rv.previewBytes so the right-click "Save image…" writes exactly the bytes on
+// screen (the decoded image, not the encoded base64 text). The preview is
+// inserted into bodyStack only while active (removed by hideImage), so a later
+// text/PDF response leaves no image behind. The image is wrapped in a fresh
+// static resource so canvas.Image loads the new bytes.
+func (rv *responseView) showImageBytes(b []byte) {
 	rv.bodyLines = nil
 	rv.bodyGrid.SetText("")
 	rv.bodyScroll.Hide()
@@ -873,7 +942,8 @@ func (rv *responseView) showImage() {
 	rv.hidePDF()
 	rv.hideImage() // drop a previous image before building the new one
 
-	rv.bodyImage = canvas.NewImageFromResource(fyne.NewStaticResource("response", rv.fullBody))
+	rv.previewBytes = b
+	rv.bodyImage = canvas.NewImageFromResource(fyne.NewStaticResource("response", b))
 	rv.bodyImage.FillMode = canvas.ImageFillContain
 	rv.bodyImage.SetMinSize(fyne.NewSize(120, 120))
 	// Wrap the preview so a right-click offers "Save image…". The wrapper renders
@@ -1018,25 +1088,54 @@ func (rv *responseView) saveToFile() {
 // shares its Fyne in-app fallback on a native-dialog error. Invoked from the
 // "Save image…" right-click menu on the inline image preview.
 func (rv *responseView) saveImage() {
-	if rv.fullBody == nil {
+	// Save the bytes that are actually on screen: the raw body for a real image
+	// (issue #16), or the DECODED image for a base64 body (issue #37). previewBytes
+	// is set by showImageBytes and tracks the visible preview.
+	data := rv.previewBytes
+	if data == nil {
+		data = rv.fullBody
+	}
+	if data == nil {
 		return
+	}
+	// Pick the filename from the bytes on screen. For a base64 image the response
+	// Content-Type is textual (text/plain, or a data: URI's wrapper), which would
+	// classify the decoded bytes as text; passing the bytes alone lets
+	// responseDefaultFilename sniff the real image magic and choose response.<ext>.
+	ct := rv.contentType
+	if rv.previewBytes != nil && classifyBody(ct, data) != bodyKindImage {
+		ct = ""
 	}
 	go func() {
 		path, ok, err := nativeSaveAny("Save Image",
-			responseDefaultFilename(rv.contentType, rv.fullBody))
+			responseDefaultFilename(ct, data))
 		fyne.Do(func() {
 			switch {
 			case err != nil:
-				rv.saveToFileFyne()
+				rv.saveImageFyne(data)
 			case !ok:
 				// cancelled
 			default:
-				if werr := os.WriteFile(path, rv.fullBody, 0o644); werr != nil {
+				if werr := os.WriteFile(path, data, 0o644); werr != nil {
 					dialog.ShowError(werr, rv.parent)
 				}
 			}
 		})
 	}()
+}
+
+// saveImageFyne is the Fyne in-app fallback for saveImage(), writing the visible
+// preview bytes (decoded image for base64, raw body otherwise).
+func (rv *responseView) saveImageFyne(data []byte) {
+	dialog.ShowFileSave(func(wc fyne.URIWriteCloser, err error) {
+		if err != nil || wc == nil {
+			return
+		}
+		defer wc.Close()
+		if _, werr := wc.Write(data); werr != nil {
+			dialog.ShowError(werr, rv.parent)
+		}
+	}, rv.parent)
 }
 
 // saveToFileFyne is the Fyne in-app fallback for saveToFile().
