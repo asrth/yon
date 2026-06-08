@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 
 	"github.com/ultramcu/yon/internal/model"
+	"github.com/ultramcu/yon/internal/oauth"
 	"github.com/ultramcu/yon/internal/store"
 	"github.com/ultramcu/yon/internal/tunnel"
 )
@@ -44,6 +45,11 @@ type App struct {
 	// to drop the previous binding.
 	tunnelMu      sync.Mutex
 	tunnelRelease map[*Window]func()
+
+	// oauth is the app-wide OAuth 2.0 token manager (issue #30): it caches
+	// access tokens per OAuth2 config for the session and refreshes them, shared
+	// across windows so a token obtained in one place serves every send.
+	oauth *oauth.Manager
 }
 
 // New constructs the UI controller around an already-created fyne.App (created
@@ -60,6 +66,7 @@ func New(a fyne.App) *App {
 	// The jump-host manager wires the UI's TOFU prompt for unknown host keys;
 	// without it the manager rejects first-time hosts (the headless default).
 	app.tunnels = tunnel.New(tunnel.WithTOFU(app.tunnelTOFUPrompt))
+	app.oauth = oauth.NewManager()
 	app.applyTheme() // apply the saved appearance theme before any window is built
 	return app
 }
