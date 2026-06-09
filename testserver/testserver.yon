@@ -15,6 +15,16 @@
       "key": "bearerToken",
       "value": "yon-demo-token",
       "enabled": true
+    },
+    {
+      "key": "oauthClientId",
+      "value": "yon-client",
+      "enabled": true
+    },
+    {
+      "key": "oauthClientSecret",
+      "value": "yon-secret",
+      "enabled": true
     }
   ],
   "activeEnvironment": "Local",
@@ -46,9 +56,33 @@
     {
       "id": "ftestchain",
       "name": "Tests & Chaining"
+    },
+    {
+      "id": "foauth",
+      "name": "OAuth 2.0 (#30)"
     }
   ],
   "requests": [
+    {
+      "name": "OAuth2 client_credentials → protected (#30)",
+      "method": "GET",
+      "url": "{{baseUrl}}/oauth/protected",
+      "auth": {
+        "kind": "oauth2",
+        "oauth2": {
+          "grant": "client_credentials",
+          "tokenUrl": "{{baseUrl}}/oauth/token",
+          "clientId": "{{oauthClientId}}",
+          "clientSecret": "{{oauthClientSecret}}",
+          "scopes": "read",
+          "clientAuth": "basic"
+        }
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "foauth"
+    },
     {
       "name": "GET — query params + custom header",
       "method": "GET",

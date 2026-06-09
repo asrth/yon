@@ -30,6 +30,13 @@ const (
 	demoBearer   = "yon-demo-token"
 	demoUser     = "alice"
 	demoPassword = "secret"
+
+	// OAuth 2.0 (#30) client_credentials demo: the client authenticates to
+	// /oauth/token with these and receives demoOAuthToken, which /oauth/protected
+	// then requires as a Bearer.
+	demoOAuthClientID     = "yon-client"
+	demoOAuthClientSecret = "yon-secret"
+	demoOAuthToken        = "yon-oauth-access-token"
 )
 
 func main() {
@@ -47,6 +54,10 @@ func newMux() *http.ServeMux {
 	}
 	mux.HandleFunc("/basic-auth/{user}/{pass}", basicAuth)
 	mux.HandleFunc("/bearer", bearerAuth)
+	// OAuth 2.0 (#30): a client_credentials token endpoint + a Bearer-protected
+	// resource, so the OAuth flow is exercisable end-to-end from testserver.yon.
+	mux.HandleFunc("/oauth/token", oauthToken)
+	mux.HandleFunc("/oauth/protected", oauthProtected)
 	mux.HandleFunc("/status/{code}", status)
 	mux.HandleFunc("/redirect", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/get", http.StatusFound)
@@ -90,6 +101,7 @@ func newMux() *http.ServeMux {
 			"endpoints": []string{
 				"/get", "/post", "/put", "/delete", "/headers",
 				"/basic-auth/{user}/{pass}", "/bearer", "/status/{code}",
+				"/oauth/token", "/oauth/protected",
 				"/redirect", "/large", "/slow?seconds=N", "/json",
 				"/xml", "/html", "/soap",
 				"/image/png", "/image/jpeg", "/image/gif", "/image/octet",
@@ -97,6 +109,7 @@ func newMux() *http.ServeMux {
 			},
 			"credentials": map[string]string{
 				"bearer": demoBearer, "basicUser": demoUser, "basicPass": demoPassword,
+				"oauthClientId": demoOAuthClientID, "oauthClientSecret": demoOAuthClientSecret,
 			},
 		})
 	})
@@ -141,6 +154,67 @@ func bearerAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "token": token})
+}
+
+// oauthToken is a minimal OAuth 2.0 token endpoint (#30) for the
+// client_credentials grant. It authenticates the client by either an HTTP Basic
+// Authorization header or client_id/client_secret in the form body (so both of
+// Yon's client-auth styles are exercised), and on success issues demoOAuthToken.
+func oauthToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"error": "invalid_request", "error_description": "POST required",
+		})
+		return
+	}
+	_ = r.ParseForm()
+	if g := r.PostForm.Get("grant_type"); g != "client_credentials" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error":             "unsupported_grant_type",
+			"error_description": "testserver issues tokens for client_credentials only (got " + g + ")",
+		})
+		return
+	}
+
+	// Client auth: prefer the Basic header, fall back to body credentials.
+	id, secret, ok := r.BasicAuth()
+	if !ok {
+		id, secret = r.PostForm.Get("client_id"), r.PostForm.Get("client_secret")
+	}
+	if id != demoOAuthClientID || secret != demoOAuthClientSecret {
+		w.Header().Set("WWW-Authenticate", `Basic realm="yon-oauth"`)
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"error":             "invalid_client",
+			"error_description": fmt.Sprintf("send client_credentials %s / %s (Basic header or body)", demoOAuthClientID, demoOAuthClientSecret),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"access_token": demoOAuthToken,
+		"token_type":   "Bearer",
+		"expires_in":   3600,
+		"scope":        r.PostForm.Get("scope"),
+	})
+}
+
+// oauthProtected is a resource that requires the Bearer token minted by
+// oauthToken (#30) — the destination of the OAuth2 request in testserver.yon.
+func oauthProtected(w http.ResponseWriter, r *http.Request) {
+	auth := r.Header.Get("Authorization")
+	token := strings.TrimPrefix(auth, "Bearer ")
+	if !strings.HasPrefix(auth, "Bearer ") || token != demoOAuthToken {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"authenticated": false,
+			"hint":          "obtain a token from /oauth/token (client_credentials) and send it as a Bearer",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"authenticated": true,
+		"via":           "oauth2 client_credentials",
+		"token":         token,
+	})
 }
 
 func status(w http.ResponseWriter, r *http.Request) {

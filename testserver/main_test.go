@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -101,6 +102,85 @@ func TestBearerAuth(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&m)
 	if resp.StatusCode != 200 || m["authenticated"] != true {
 		t.Fatalf("good token: code=%d m=%v", resp.StatusCode, m)
+	}
+}
+
+// TestOAuthClientCredentials exercises the #30 token endpoint end-to-end: it
+// issues a token for valid client_credentials presented either as an HTTP Basic
+// header (Yon's default client-auth style) or in the body, rejects bad
+// credentials and the wrong grant, and the issued token unlocks /oauth/protected
+// while a bogus token does not.
+func TestOAuthClientCredentials(t *testing.T) {
+	srv, c := newTestServer(t)
+
+	tokenURL := srv.URL + "/oauth/token"
+	postToken := func(setup func(*http.Request)) (int, map[string]any) {
+		form := url.Values{"grant_type": {"client_credentials"}, "scope": {"read"}}
+		req, _ := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		setup(req)
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("POST /oauth/token: %v", err)
+		}
+		defer resp.Body.Close()
+		var m map[string]any
+		json.NewDecoder(resp.Body).Decode(&m)
+		return resp.StatusCode, m
+	}
+
+	// Basic-header client auth → 200 + the demo token.
+	code, m := postToken(func(req *http.Request) { req.SetBasicAuth(demoOAuthClientID, demoOAuthClientSecret) })
+	if code != 200 || m["access_token"] != demoOAuthToken || m["token_type"] != "Bearer" {
+		t.Fatalf("basic-auth token: code=%d m=%v", code, m)
+	}
+
+	// Body client auth (client_id/client_secret in the form) → 200 + the token.
+	code, m = postToken(func(req *http.Request) {
+		form := url.Values{"grant_type": {"client_credentials"}, "client_id": {demoOAuthClientID}, "client_secret": {demoOAuthClientSecret}}
+		req.Body = io.NopCloser(strings.NewReader(form.Encode()))
+		req.ContentLength = int64(len(form.Encode()))
+	})
+	if code != 200 || m["access_token"] != demoOAuthToken {
+		t.Fatalf("body-auth token: code=%d m=%v", code, m)
+	}
+
+	// Bad client secret → 401 invalid_client, no token.
+	if code, m := postToken(func(req *http.Request) { req.SetBasicAuth(demoOAuthClientID, "wrong") }); code != 401 || m["error"] != "invalid_client" {
+		t.Fatalf("bad secret: code=%d m=%v, want 401 invalid_client", code, m)
+	}
+
+	// Wrong grant_type → 400 unsupported_grant_type.
+	{
+		form := url.Values{"grant_type": {"password"}}
+		req, _ := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth(demoOAuthClientID, demoOAuthClientSecret)
+		resp, _ := c.Do(req)
+		var mm map[string]any
+		json.NewDecoder(resp.Body).Decode(&mm)
+		resp.Body.Close()
+		if resp.StatusCode != 400 || mm["error"] != "unsupported_grant_type" {
+			t.Fatalf("wrong grant: code=%d m=%v, want 400 unsupported_grant_type", resp.StatusCode, mm)
+		}
+	}
+
+	// The issued token unlocks the protected resource…
+	protURL := srv.URL + "/oauth/protected"
+	if code, m := getJSON(t, c, protURL); code != 401 || m["authenticated"] != false {
+		t.Fatalf("protected without token: code=%d m=%v, want 401", code, m)
+	}
+	req, _ := http.NewRequest(http.MethodGet, protURL, nil)
+	req.Header.Set("Authorization", "Bearer "+demoOAuthToken)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var pm map[string]any
+	json.NewDecoder(resp.Body).Decode(&pm)
+	if resp.StatusCode != 200 || pm["authenticated"] != true {
+		t.Fatalf("protected with token: code=%d m=%v", resp.StatusCode, pm)
 	}
 }
 
