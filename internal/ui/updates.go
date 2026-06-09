@@ -2,10 +2,13 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image/color"
 	"net/url"
 	"runtime"
+	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -145,9 +148,17 @@ func (w *Window) applyUpdateResult(cur string, rel updater.Release, manual bool)
 	}
 }
 
+// installTimeout bounds the one-click auto-install (verify + mount + atomic
+// swap + relaunch). It is generous so a slow disk or notarization check on a
+// large .dmg doesn't get cancelled mid-swap.
+const installTimeout = 5 * time.Minute
+
 // downloadUpdate fetches the pending release's asset into the Downloads folder,
-// reveals it in the file manager, and tells the user where it landed. It does
-// not install anything.
+// then offers to install it. When this build can self-update (an officially
+// signed .app installed in a writable bundle) and the asset is a .dmg, it
+// presents a one-click "Update & Relaunch" path; on any failure — or when
+// auto-install isn't possible — it falls back to revealing the download and
+// offering "Open & Quit" so the user can install manually.
 func (w *Window) downloadUpdate() {
 	rel, asset := w.pendingRel, w.pendingAsset
 	if asset.URL == "" {
@@ -169,24 +180,83 @@ func (w *Window) downloadUpdate() {
 				dialog.ShowError(fmt.Errorf("download failed: %w", err), w.win)
 				return
 			}
-			// Installing means replacing the running app, so offer to open the
-			// downloaded installer and quit Yon now (you can't overwrite it while
-			// it's running). "Later" just reveals the file in the file manager.
-			d := dialog.NewConfirm("Update downloaded",
-				fmt.Sprintf("Yon %s was downloaded to:\n%s\n\nTo install it, Yon needs to quit so the running app can be replaced. Open the installer and quit Yon now?", rel.TagName, path),
-				func(ok bool) {
-					if !ok {
-						_ = updater.Reveal(path)
-						return
-					}
-					go func() {
-						_ = updater.OpenFile(path)
-						fyne.Do(func() { fyne.CurrentApp().Quit() })
-					}()
-				}, w.win)
-			d.SetConfirmText("Open & Quit")
-			d.SetDismissText("Later")
-			d.Show()
+			// Prefer the one-click path on an officially-signed .app that can
+			// replace itself in place; otherwise (or on failure) fall back to the
+			// manual download+open flow.
+			if _, can := updater.CanAutoInstall(); can && strings.HasSuffix(strings.ToLower(asset.Name), ".dmg") {
+				w.offerAutoInstall(rel, path)
+				return
+			}
+			w.offerManualInstall(rel, path)
 		})
 	}()
+}
+
+// offerAutoInstall presents the one-click "Update & Relaunch" path. On tap it
+// shows an "Updating…" progress dialog and runs updater.AutoInstall on a
+// goroutine; the progress callback streams step text into the dialog. On
+// success the freshly-installed app is relaunched, so Yon quits. On any error
+// it hides progress and falls back to the manual download+open flow. "Later"
+// keeps the download for the user to install themselves.
+func (w *Window) offerAutoInstall(rel updater.Release, path string) {
+	d := dialog.NewConfirm("Install update",
+		fmt.Sprintf("Yon %s is ready to install. Yon will update itself and relaunch.", rel.TagName),
+		func(ok bool) {
+			if !ok {
+				_ = updater.Reveal(path)
+				return
+			}
+			progressLabel := widget.NewLabel("Updating…")
+			updating := dialog.NewCustomWithoutButtons("Updating…",
+				container.NewVBox(progressLabel, widget.NewProgressBarInfinite()), w.win)
+			updating.Show()
+
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), installTimeout)
+				defer cancel()
+				err := updater.AutoInstall(ctx, path, func(msg string) {
+					fyne.Do(func() { progressLabel.SetText(msg) })
+				})
+
+				fyne.Do(func() {
+					if err != nil {
+						updating.Hide()
+						// Auto-install left the installed app untouched; let the user
+						// install manually instead.
+						if !errors.Is(err, updater.ErrAutoInstallUnsupported) {
+							dialog.ShowError(fmt.Errorf("auto-install failed, you can install it manually: %w", err), w.win)
+						}
+						w.offerManualInstall(rel, path)
+						return
+					}
+					// AutoInstall relaunches the new version; quit the old one.
+					fyne.CurrentApp().Quit()
+				})
+			}()
+		}, w.win)
+	d.SetConfirmText("Update & Relaunch")
+	d.SetDismissText("Later")
+	d.Show()
+}
+
+// offerManualInstall is the fallback flow: installing means replacing the
+// running app, so offer to open the downloaded installer and quit Yon now (you
+// can't overwrite it while it's running). "Later" just reveals the file in the
+// file manager.
+func (w *Window) offerManualInstall(rel updater.Release, path string) {
+	d := dialog.NewConfirm("Update downloaded",
+		fmt.Sprintf("Yon %s was downloaded to:\n%s\n\nTo install it, Yon needs to quit so the running app can be replaced. Open the installer and quit Yon now?", rel.TagName, path),
+		func(ok bool) {
+			if !ok {
+				_ = updater.Reveal(path)
+				return
+			}
+			go func() {
+				_ = updater.OpenFile(path)
+				fyne.Do(func() { fyne.CurrentApp().Quit() })
+			}()
+		}, w.win)
+	d.SetConfirmText("Open & Quit")
+	d.SetDismissText("Later")
+	d.Show()
 }

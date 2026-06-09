@@ -59,6 +59,7 @@ jobs:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
@@ -68,8 +69,8 @@ jobs:
           if [ "${{ matrix.target }}" = "darwin" ]; then
             # Build both arches and lipo into a universal binary, then swap it
             # into the .app that fyne packages.
-            CGO_ENABLED=1 GOARCH=arm64 go build -o yon-arm64 .
-            CGO_ENABLED=1 GOARCH=amd64 go build -o yon-amd64 .
+            CGO_ENABLED=1 GOARCH=arm64 go build -ldflags "-X 'github.com/ultramcu/yon/internal/updater.expectedTeamID=${APPLE_TEAM_ID}'" -o yon-arm64 .
+            CGO_ENABLED=1 GOARCH=amd64 go build -ldflags "-X 'github.com/ultramcu/yon/internal/updater.expectedTeamID=${APPLE_TEAM_ID}'" -o yon-amd64 .
             lipo -create -output yon-universal yon-arm64 yon-amd64
             "$FYNE" package -os darwin
             exe="$(ls Yon.app/Contents/MacOS/*)"
