@@ -147,12 +147,12 @@ func BuildWith(ctx context.Context, req model.Request, coll model.Collection, op
 		return nil, err
 	}
 
-	// Body: WYSIWYG — send for any method when present. Resolve the content so
-	// {{variable}} templates in the body are expanded on the wire.
-	var body io.Reader
-	hasBody := req.Body.Type != model.BodyNone && req.Body.Content != ""
-	if hasBody {
-		body = strings.NewReader(opts.resolve(req.Body.Content))
+	// Body: WYSIWYG — send for any method when present. buildBodyReader resolves
+	// {{variable}} templates and reports the Content-Type the body type implies
+	// (applied below only when the user did not set one explicitly).
+	body, autoContentType, err := buildBodyReader(req.Body, opts.resolve)
+	if err != nil {
+		return nil, err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, string(req.Method), finalURL, body)
@@ -211,14 +211,10 @@ func BuildWith(ctx context.Context, req model.Request, coll model.Collection, op
 		}
 	}
 
-	// JSON auto Content-Type, only when present and not user-overridden.
-	if hasBody && req.Body.Type == model.BodyJSON && !userSetContentType {
-		httpReq.Header.Set(headerContentType, "application/json")
-	}
-
-	// XML auto Content-Type, only when present and not user-overridden.
-	if hasBody && req.Body.Type == model.BodyXML && !userSetContentType {
-		httpReq.Header.Set(headerContentType, "application/xml")
+	// Automatic Content-Type from the body type (JSON/XML/form/multipart), only
+	// when the body implies one and the user did not set Content-Type explicitly.
+	if autoContentType != "" && !userSetContentType {
+		httpReq.Header.Set(headerContentType, autoContentType)
 	}
 
 	return httpReq, nil

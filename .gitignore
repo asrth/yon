@@ -14,3 +14,6 @@
 /assets/design/
 /assets/logo/archive/
 /assets/logo/yon[1-5].png
+
+# Local Claude Code session data (worktrees, history)
+.claude/

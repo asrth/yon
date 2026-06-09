@@ -60,6 +60,10 @@
     {
       "id": "foauth",
       "name": "OAuth 2.0 (#30)"
+    },
+    {
+      "id": "fform",
+      "name": "Form & Multipart (#48)"
     }
   ],
   "requests": [
@@ -598,6 +602,54 @@
           "enabled": true
         }
       ]
+    },
+    {
+      "name": "Form (urlencoded) → /form (#48)",
+      "method": "POST",
+      "url": "{{baseUrl}}/form",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "form",
+        "fields": [
+          {
+            "key": "name",
+            "value": "yon",
+            "enabled": true
+          },
+          {
+            "key": "lang",
+            "value": "go",
+            "enabled": true
+          }
+        ]
+      },
+      "folderId": "fform"
+    },
+    {
+      "name": "Multipart (text fields) → /form (#48)",
+      "method": "POST",
+      "url": "{{baseUrl}}/form",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "multipart",
+        "fields": [
+          {
+            "key": "title",
+            "value": "hello",
+            "enabled": true
+          },
+          {
+            "key": "tag",
+            "value": "http",
+            "enabled": true
+          }
+        ]
+      },
+      "folderId": "fform"
     }
   ]
 }

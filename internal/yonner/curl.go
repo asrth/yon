@@ -113,11 +113,40 @@ func ToCurl(req model.Request, coll model.Collection, opts Options) string {
 		}
 	}
 
-	if req.Body.Type != model.BodyNone && req.Body.Content != "" {
-		if req.Body.Type == model.BodyJSON && !userSetCT {
-			fmt.Fprintf(&b, " -H %s", shellQuote("Content-Type: application/json"))
+	switch req.Body.Type {
+	case model.BodyForm:
+		// curl sets the application/x-www-form-urlencoded Content-Type itself for
+		// --data-urlencode, so we emit no Content-Type header here.
+		for _, f := range req.Body.Fields {
+			if !f.Enabled || f.Key == "" {
+				continue
+			}
+			fmt.Fprintf(&b, " --data-urlencode %s", shellQuote(opts.resolve(f.Key)+"="+opts.resolve(f.Value)))
 		}
-		fmt.Fprintf(&b, " --data-raw %s", shellQuote(opts.resolve(req.Body.Content)))
+	case model.BodyMultipart:
+		// curl builds the multipart/form-data Content-Type (with boundary) itself
+		// for -F, so we emit no Content-Type header here.
+		for _, f := range req.Body.Fields {
+			if !f.Enabled || f.Key == "" {
+				continue
+			}
+			if f.IsFile {
+				arg := opts.resolve(f.Key) + "=@" + opts.resolve(f.Value)
+				if f.Filename != "" {
+					arg += ";filename=" + opts.resolve(f.Filename)
+				}
+				fmt.Fprintf(&b, " -F %s", shellQuote(arg))
+			} else {
+				fmt.Fprintf(&b, " -F %s", shellQuote(opts.resolve(f.Key)+"="+opts.resolve(f.Value)))
+			}
+		}
+	default:
+		if req.Body.Type != model.BodyNone && req.Body.Content != "" {
+			if req.Body.Type == model.BodyJSON && !userSetCT {
+				fmt.Fprintf(&b, " -H %s", shellQuote("Content-Type: application/json"))
+			}
+			fmt.Fprintf(&b, " --data-raw %s", shellQuote(opts.resolve(req.Body.Content)))
+		}
 	}
 
 	return b.String()
