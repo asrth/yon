@@ -4,6 +4,23 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-06-09
+
+### Added
+- **One-click app update** ([#41]) — *Check for Updates…* can now **download,
+  verify, replace the installed app, and relaunch** in a single click on macOS.
+  The downloaded build is verified as Yon's notarized, Developer ID–signed
+  release (pinned Team ID) before the installed `/Applications/Yon.app` is
+  replaced by an atomic swap and the new version relaunches. Any failure, or an
+  app that is not eligible (not signed, or not in a writable install location),
+  falls back to the previous download-and-open flow. The macOS swap is fully
+  atomic via `renamex_np(RENAME_SWAP)` ([#54]), so the app is never left in a
+  half-replaced state.
+- **More bundled test-server endpoints** ([#51]) — `testserver/` gains an
+  in-memory `/users` CRUD resource, `/cookies` (set + echo), a gzip-encoded
+  `/gzip`, and a request-echo `/debug`, with matching requests in
+  `testserver.yon`.
+
 ## [1.5.0] - 2026-06-09
 
 ### Added
@@ -480,3 +497,6 @@ First stable release. New home: the project moved to
 [#40]: https://github.com/asrth/yon/issues/40
 [#30]: https://github.com/asrth/yon/issues/30
 [#48]: https://github.com/asrth/yon/issues/48
+[#41]: https://github.com/asrth/yon/issues/41
+[#51]: https://github.com/asrth/yon/issues/51
+[#54]: https://github.com/asrth/yon/issues/54
