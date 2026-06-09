@@ -178,6 +178,27 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	rt.paramsTable = newKVTable(syncedParams, func() { rt.onParamsEdited() })
 	rt.headerTable = newKVTable(req.Headers, func() { rt.commit() })
 	rt.authEditor = newAuthEditor(req.Auth, true, func() { rt.commit() })
+	// OAuth 2.0 (issue #30): the authEditor's "Get Token" button delegates to the
+	// Window's oauth flow. oauthGetToken stores the token in the app's session
+	// manager and reports a short status; push that back into the form's status
+	// label (and surface any error). Both onDone and SetText run on the UI thread.
+	rt.authEditor.onGetToken = func(cfg model.OAuth2Config) {
+		w.oauthGetToken(cfg, func(status string, err error) {
+			if err != nil {
+				rt.authEditor.setOAuthStatus("Error: " + err.Error())
+				return
+			}
+			rt.authEditor.setOAuthStatus(status)
+		})
+	}
+	// Seed the token-status label from any already-cached token for this config.
+	{
+		var cfg model.OAuth2Config
+		if req.Auth.OAuth2 != nil {
+			cfg = *req.Auth.OAuth2
+		}
+		rt.authEditor.setOAuthStatus(w.oauthStatusText(cfg))
+	}
 	bodyPane := rt.buildBody(req)
 
 	rt.segTabs = newSegTabs()
@@ -450,6 +471,9 @@ func (rt *requestTab) startSend() {
 	// Expand {{variable}} templates (URL, params, headers, body, auth) using the
 	// window's active environment + collection variables.
 	opts.Resolve = rt.win.varScope().Resolve
+	// OAuth 2.0 (issue #30): when a request resolves to AuthOAuth2, yonner asks
+	// this provider for a Bearer token (normally already cached from "Get Token").
+	opts.OAuth2Token = rt.win.oauth2TokenProvider()
 	// When the active environment defines a complete SSH jump host, dial every
 	// Request THROUGH it; otherwise opts.DialContext stays nil and the send uses
 	// the default transport unchanged.
