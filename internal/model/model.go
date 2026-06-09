@@ -140,13 +140,37 @@ const (
 	// BodyXML means the body is XML; the sender adds an "application/xml"
 	// Content-Type unless one is already set.
 	BodyXML BodyType = "xml"
+	// BodyForm is an application/x-www-form-urlencoded body built from the
+	// enabled Body.Fields (key/value pairs); the sender adds the matching
+	// Content-Type unless one is already set. Fields' Content is ignored.
+	BodyForm BodyType = "form"
+	// BodyMultipart is a multipart/form-data body built from the enabled
+	// Body.Fields: text parts and (for fields with IsFile) file parts read from
+	// the field Value path at send time. The sender adds the multipart
+	// Content-Type (with its generated boundary) unless one is already set.
+	BodyMultipart BodyType = "multipart"
 )
 
+// FormField is one part of a BodyForm or BodyMultipart body: a key/value pair
+// with an Enabled flag (disabled fields are kept but not sent), mirroring Param.
+// For BodyMultipart, IsFile marks the field as a file part whose Value is a
+// filesystem path read at send time; Filename overrides the part's filename
+// (defaulting to the path's basename). IsFile/Filename are ignored for BodyForm.
+type FormField struct {
+	Key      string `json:"key"`
+	Value    string `json:"value"`
+	Enabled  bool   `json:"enabled"`
+	IsFile   bool   `json:"isFile,omitempty"`
+	Filename string `json:"filename,omitempty"`
+}
+
 // Body is the payload of a Request. It is held on every Request regardless of
-// Method and is sent as-is when Content is non-empty.
+// Method and is sent as-is when Content is non-empty. For BodyForm/BodyMultipart
+// the payload is built from Fields instead of Content.
 type Body struct {
-	Type    BodyType `json:"type"`
-	Content string   `json:"content,omitempty"`
+	Type    BodyType    `json:"type"`
+	Content string      `json:"content,omitempty"`
+	Fields  []FormField `json:"fields,omitempty"`
 }
 
 // Folder is a one-level-deep grouping of Requests within a Collection. Folders
