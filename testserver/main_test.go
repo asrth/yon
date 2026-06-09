@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"image"
@@ -524,6 +525,170 @@ func TestFormEcho_Multipart(t *testing.T) {
 	}
 	if size, _ := f["size"].(float64); int(size) != len(fileContent) {
 		t.Errorf("file size = %v, want %d", f["size"], len(fileContent))
+	}
+}
+
+// TestUsersCRUD exercises the in-memory /users resource (#51) end-to-end:
+// create → get → patch → delete → 404, plus the seeded list.
+func TestUsersCRUD(t *testing.T) {
+	srv, c := newTestServer(t)
+	base := srv.URL + "/users"
+
+	// Seeded list has the two starter users.
+	code, m := getJSON(t, c, base)
+	if code != 200 {
+		t.Fatalf("GET /users = %d, want 200", code)
+	}
+	if cnt, _ := m["count"].(float64); int(cnt) != 2 {
+		t.Fatalf("seeded count = %v, want 2", m["count"])
+	}
+
+	// Create.
+	resp, err := c.Post(base, "application/json", strings.NewReader(`{"name":"Grace Hopper","email":"grace@example.com"}`))
+	if err != nil {
+		t.Fatalf("POST /users: %v", err)
+	}
+	var created map[string]any
+	json.NewDecoder(resp.Body).Decode(&created)
+	resp.Body.Close()
+	if resp.StatusCode != 201 {
+		t.Fatalf("POST /users = %d, want 201", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc == "" {
+		t.Errorf("POST /users missing Location header")
+	}
+	idF, _ := created["id"].(float64)
+	id := strconv.Itoa(int(idF))
+	if int(idF) != 3 {
+		t.Errorf("created id = %v, want 3 (next after seeds)", created["id"])
+	}
+
+	// Get the created user.
+	code, got := getJSON(t, c, base+"/"+id)
+	if code != 200 || got["name"] != "Grace Hopper" {
+		t.Fatalf("GET /users/%s = %d %v", id, code, got)
+	}
+
+	// Patch only the email.
+	preq, _ := http.NewRequest(http.MethodPatch, base+"/"+id, strings.NewReader(`{"email":"grace2@example.com"}`))
+	preq.Header.Set("Content-Type", "application/json")
+	presp, err := c.Do(preq)
+	if err != nil {
+		t.Fatalf("PATCH /users/%s: %v", id, err)
+	}
+	var patched map[string]any
+	json.NewDecoder(presp.Body).Decode(&patched)
+	presp.Body.Close()
+	if presp.StatusCode != 200 || patched["email"] != "grace2@example.com" || patched["name"] != "Grace Hopper" {
+		t.Fatalf("PATCH result = %d %v (name should be unchanged, email updated)", presp.StatusCode, patched)
+	}
+
+	// Delete → 204.
+	dreq, _ := http.NewRequest(http.MethodDelete, base+"/"+id, nil)
+	dresp, err := c.Do(dreq)
+	if err != nil {
+		t.Fatalf("DELETE /users/%s: %v", id, err)
+	}
+	dresp.Body.Close()
+	if dresp.StatusCode != 204 {
+		t.Fatalf("DELETE /users/%s = %d, want 204", id, dresp.StatusCode)
+	}
+
+	// Now gone → 404.
+	if code, _ := getJSON(t, c, base+"/"+id); code != 404 {
+		t.Fatalf("GET deleted /users/%s = %d, want 404", id, code)
+	}
+
+	// A non-numeric id → 400.
+	if code, _ := getJSON(t, c, base+"/abc"); code != 400 {
+		t.Fatalf("GET /users/abc = %d, want 400", code)
+	}
+}
+
+// TestCookies covers /cookies/set (Set-Cookie) and /cookies (echo).
+func TestCookies(t *testing.T) {
+	srv, c := newTestServer(t)
+
+	resp, err := c.Get(srv.URL + "/cookies/set?name=token&value=abc123")
+	if err != nil {
+		t.Fatalf("GET /cookies/set: %v", err)
+	}
+	resp.Body.Close()
+	var setCookie string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "token" {
+			setCookie = ck.Value
+		}
+	}
+	if setCookie != "abc123" {
+		t.Fatalf("Set-Cookie token = %q, want abc123", setCookie)
+	}
+
+	// Echo a cookie we send.
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/cookies", nil)
+	req.AddCookie(&http.Cookie{Name: "token", Value: "abc123"})
+	er, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("GET /cookies: %v", err)
+	}
+	var m map[string]any
+	json.NewDecoder(er.Body).Decode(&m)
+	er.Body.Close()
+	cookies, _ := m["cookies"].(map[string]any)
+	if cookies["token"] != "abc123" {
+		t.Fatalf("echoed cookies = %v, want token=abc123", cookies)
+	}
+}
+
+// TestGzip confirms /gzip returns a gzip-encoded JSON body. The request sets
+// Accept-Encoding: gzip explicitly so Go's transport does not transparently
+// decompress it, letting the test verify the bytes are really gzipped.
+func TestGzip(t *testing.T) {
+	srv, c := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/gzip", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("GET /gzip: %v", err)
+	}
+	defer resp.Body.Close()
+	if ce := resp.Header.Get("Content-Encoding"); ce != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", ce)
+	}
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	defer gz.Close()
+	var m map[string]any
+	if err := json.NewDecoder(gz).Decode(&m); err != nil {
+		t.Fatalf("decode gunzipped JSON: %v", err)
+	}
+	if m["gzipped"] != true {
+		t.Fatalf("decompressed body = %v, want gzipped:true", m)
+	}
+}
+
+// TestDebugEcho confirms /debug reflects method, headers, query, and body.
+func TestDebugEcho(t *testing.T) {
+	srv, c := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/debug?x=1", strings.NewReader("hello-body"))
+	req.Header.Set("X-Probe", "yon")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("POST /debug: %v", err)
+	}
+	defer resp.Body.Close()
+	var m map[string]any
+	json.NewDecoder(resp.Body).Decode(&m)
+	if m["method"] != "POST" || m["body"] != "hello-body" {
+		t.Fatalf("debug method/body wrong: %v", m)
+	}
+	if q, _ := m["query"].(map[string]any); q["x"] != "1" {
+		t.Fatalf("debug query = %v, want x=1", m["query"])
+	}
+	if h, _ := m["headers"].(map[string]any); h["X-Probe"] != "yon" {
+		t.Fatalf("debug headers missing X-Probe: %v", m["headers"])
 	}
 }
 
