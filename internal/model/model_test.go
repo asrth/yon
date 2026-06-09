@@ -260,8 +260,17 @@ func TestJSONRoundTrip(t *testing.T) {
 		if gw.Auth != ow.Auth {
 			t.Errorf("req[%d].Auth = %+v, want %+v", i, gw.Auth, ow.Auth)
 		}
-		if gw.Body != ow.Body {
+		if gw.Body.Type != ow.Body.Type || gw.Body.Content != ow.Body.Content {
 			t.Errorf("req[%d].Body = %+v, want %+v", i, gw.Body, ow.Body)
+		}
+		if len(gw.Body.Fields) != len(ow.Body.Fields) {
+			t.Errorf("req[%d].Body.Fields len = %d, want %d", i, len(gw.Body.Fields), len(ow.Body.Fields))
+		} else {
+			for j := range ow.Body.Fields {
+				if gw.Body.Fields[j] != ow.Body.Fields[j] {
+					t.Errorf("req[%d].Body.Fields[%d] = %+v, want %+v", i, j, gw.Body.Fields[j], ow.Body.Fields[j])
+				}
+			}
 		}
 		if len(gw.Params) != len(ow.Params) {
 			t.Errorf("req[%d].Params len = %d, want %d", i, len(gw.Params), len(ow.Params))

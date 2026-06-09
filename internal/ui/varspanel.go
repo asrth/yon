@@ -158,7 +158,11 @@ func newVarsPanel(w *Window) *varsPanel {
 		runtimeSubheader,
 		p.runtimeRows,
 	)
-	p.container = container.NewVScroll(body)
+	// Bi-directional scroll (not vertical-only): a long value — e.g. a captured
+	// JWT token — must scroll horizontally inside the panel rather than letting
+	// the row's wide MinSize drive the panel (and the window) wider with no way
+	// to shrink back (issue #36, same class as #32).
+	p.container = container.NewScroll(body)
 
 	p.refresh()
 	return p

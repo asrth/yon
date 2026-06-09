@@ -40,8 +40,9 @@ func FromCurl(text string) (model.Request, error) {
 		urlSet      bool // first positional/--url wins
 		methodSet   bool // an explicit -X/-I pins the method
 		dataParts   []string
-		dataAsQuery bool // -G: send accumulated data as query params, not a body
-		userAuth    bool // -u seen (Basic wins over an Authorization header)
+		formParts   []model.FormField // -F/--form: multipart parts (wins over -d)
+		dataAsQuery bool              // -G: send accumulated data as query params, not a body
+		userAuth    bool              // -u seen (Basic wins over an Authorization header)
 	)
 
 	// next consumes the value for a flag that takes a separate argument. inline
@@ -106,6 +107,10 @@ func FromCurl(text string) (model.Request, error) {
 		case "--data-urlencode":
 			if v, ok := value(); ok {
 				dataParts = append(dataParts, urlEncodeData(v))
+			}
+		case "-F", "--form":
+			if v, ok := value(); ok {
+				formParts = append(formParts, parseFormField(v))
 			}
 		case "-G", "--get":
 			dataAsQuery = true
@@ -188,13 +193,23 @@ func FromCurl(text string) (model.Request, error) {
 		data = ""
 	}
 
-	applyBody(&req, data, methodSet)
-	applyContentTypeAndAuth(&req, data != "", userAuth)
+	// -F/--form takes precedence: a multipart body is built from the collected
+	// parts and any -d text is ignored (mixing -F and -d is unusual; curl itself
+	// rejects it). hasBody tracks whether *any* body is present for the
+	// Content-Type/method reconciliation below.
+	hasBody := data != ""
+	if len(formParts) > 0 {
+		req.Body = model.Body{Type: model.BodyMultipart, Fields: formParts}
+		hasBody = true
+	} else {
+		applyBody(&req, data, methodSet)
+	}
+	applyContentTypeAndAuth(&req, hasBody, userAuth)
 
-	// Default method. curl uses GET, unless data is present without an explicit
+	// Default method. curl uses GET, unless a body is present without an explicit
 	// method, in which case it POSTs.
 	if req.Method == "" {
-		if data != "" {
+		if hasBody {
 			req.Method = model.MethodPost
 		} else {
 			req.Method = model.MethodGet
@@ -274,7 +289,7 @@ func applyContentTypeAndAuth(req *model.Request, hasBody, userAuth bool) {
 // as that argument rather than as a bundle of further short flags.
 func shortFlagTakesValue(c byte) bool {
 	switch c {
-	case 'X', 'H', 'd', 'u', 'A', 'e', 'b', 'o':
+	case 'X', 'H', 'd', 'F', 'u', 'A', 'e', 'b', 'o':
 		return true
 	}
 	return false
@@ -333,6 +348,29 @@ func urlEncodeData(s string) string {
 		return s[:i+1] + url.QueryEscape(s[i+1:])
 	}
 	return url.QueryEscape(s)
+}
+
+// parseFormField parses one curl -F/--form value into a multipart FormField.
+// The value is split on the FIRST '='; the left side is the key. A right side
+// beginning with '@' is a file part (IsFile=true) whose Value is the path after
+// the '@', with a trailing ";filename=NAME" stripped off into Filename; any
+// other right side is a text part whose Value is taken literally. A value with
+// no '=' becomes a text field with an empty value. Imported fields are enabled.
+func parseFormField(s string) model.FormField {
+	key, rhs, _ := strings.Cut(s, "=")
+	f := model.FormField{Key: key, Enabled: true}
+	if strings.HasPrefix(rhs, "@") {
+		f.IsFile = true
+		path := rhs[1:]
+		if i := strings.Index(path, ";filename="); i >= 0 {
+			f.Filename = path[i+len(";filename="):]
+			path = path[:i]
+		}
+		f.Value = path
+	} else {
+		f.Value = rhs
+	}
+	return f
 }
 
 // dataToParams turns a urlencoded "a=1&b=2" data string into enabled query

@@ -30,7 +30,7 @@ var methodOptions = []string{
 }
 
 // bodyTypeLabels lists the Body-type Select values, label → model.BodyType.
-var bodyTypeLabels = []string{"None", "JSON", "XML", "Text"}
+var bodyTypeLabels = []string{"None", "JSON", "XML", "Text", "Form", "Multipart"}
 
 func bodyTypeFromLabel(label string) model.BodyType {
 	switch label {
@@ -40,6 +40,10 @@ func bodyTypeFromLabel(label string) model.BodyType {
 		return model.BodyXML
 	case "Text":
 		return model.BodyText
+	case "Form":
+		return model.BodyForm
+	case "Multipart":
+		return model.BodyMultipart
 	default:
 		return model.BodyNone
 	}
@@ -53,6 +57,10 @@ func bodyTypeToLabel(t model.BodyType) string {
 		return "XML"
 	case model.BodyText:
 		return "Text"
+	case model.BodyForm:
+		return "Form"
+	case model.BodyMultipart:
+		return "Multipart"
 	default:
 		return "None"
 	}
@@ -77,8 +85,13 @@ type requestTab struct {
 	authEditor  *authEditor
 	bodyTypeSel *widget.Select
 	bodyEntry   *widget.Entry
-	optionsTab  *requestOptionsTab
-	testsTab    *testsTab
+	// formTable edits a Form (urlencoded) body; multipartTable edits a Multipart
+	// body (with per-row File parts). Exactly one body editor is visible at a time
+	// (text entry / form table / multipart table), swapped by the type Select.
+	formTable      *formFieldTable
+	multipartTable *formFieldTable
+	optionsTab     *requestOptionsTab
+	testsTab       *testsTab
 	// curlEntry shows the equivalent curl command in the "cURL" sub-tab. Its text
 	// is not part of the request model — refreshCurl rebuilds it on every commit,
 	// so any user edit to it is harmless (overwritten on the next refresh).
@@ -178,6 +191,27 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	rt.paramsTable = newKVTable(syncedParams, func() { rt.onParamsEdited() })
 	rt.headerTable = newKVTable(req.Headers, func() { rt.commit() })
 	rt.authEditor = newAuthEditor(req.Auth, true, func() { rt.commit() })
+	// OAuth 2.0 (issue #30): the authEditor's "Get Token" button delegates to the
+	// Window's oauth flow. oauthGetToken stores the token in the app's session
+	// manager and reports a short status; push that back into the form's status
+	// label (and surface any error). Both onDone and SetText run on the UI thread.
+	rt.authEditor.onGetToken = func(cfg model.OAuth2Config) {
+		w.oauthGetToken(cfg, func(status string, err error) {
+			if err != nil {
+				rt.authEditor.setOAuthStatus("Error: " + err.Error())
+				return
+			}
+			rt.authEditor.setOAuthStatus(status)
+		})
+	}
+	// Seed the token-status label from any already-cached token for this config.
+	{
+		var cfg model.OAuth2Config
+		if req.Auth.OAuth2 != nil {
+			cfg = *req.Auth.OAuth2
+		}
+		rt.authEditor.setOAuthStatus(w.oauthStatusText(cfg))
+	}
 	bodyPane := rt.buildBody(req)
 
 	rt.segTabs = newSegTabs()
@@ -226,45 +260,84 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	return rt
 }
 
-// buildBody constructs the Body sub-tab: a type Select plus a multiline Entry
-// (editing input may use an Entry per the read-only-response rule). The editor is hidden for None.
-// For XML a "Format" button pretty-indents the editor contents in place.
+// buildBody constructs the Body sub-tab: a type Select plus one of three editors
+// shown at a time — a multiline Entry (JSON/XML/Text), the Form field table, or
+// the Multipart field table (editing input may use an Entry per the
+// read-only-response rule). Everything is hidden for None. For XML a "Format"
+// button pretty-indents the editor contents in place.
+//
+// The Form/Multipart tables are seeded from req.Body.Fields when that is their
+// respective type, so reopening a saved Form/Multipart request shows its fields;
+// switching type between Form and Multipart preserves each table's own rows.
 func (rt *requestTab) buildBody(req model.Request) fyne.CanvasObject {
 	rt.bodyEntry = widget.NewMultiLineEntry()
 	rt.bodyEntry.SetText(req.Body.Content)
 	rt.bodyEntry.OnChanged = func(string) { rt.commit() }
 	rt.bodyEntry.Wrapping = fyne.TextWrapOff
 
+	// Seed each field table only from a matching saved body; the other starts
+	// empty. onChange is wired to commit() (the tables seed their rows before
+	// wiring row handlers, so seeding never fires commit).
+	var formFields, multipartFields []model.FormField
+	if req.Body.Type == model.BodyForm {
+		formFields = req.Body.Fields
+	}
+	if req.Body.Type == model.BodyMultipart {
+		multipartFields = req.Body.Fields
+	}
+	rt.formTable = newFormFieldTable(formFields, false, func() { rt.commit() })
+	rt.multipartTable = newFormFieldTable(multipartFields, true, func() { rt.commit() })
+	// The file picker needs the parent window as its dialog parent.
+	rt.multipartTable.setWindow(rt.win.win)
+
 	// "Format" pretty-prints the XML body; only shown for the XML body type.
 	formatBtn := widget.NewButton("Format", rt.formatXMLBody)
 	formatBtn.Importance = widget.LowImportance
 
 	rt.bodyTypeSel = widget.NewSelect(bodyTypeLabels, func(label string) {
-		if label == "None" {
-			rt.bodyEntry.Hide()
-		} else {
-			rt.bodyEntry.Show()
-		}
-		if label == "XML" {
-			formatBtn.Show()
-		} else {
-			formatBtn.Hide()
-		}
+		rt.showBodyEditor(bodyTypeFromLabel(label), formatBtn)
 		rt.commit()
 	})
 	rt.bodyTypeSel.SetSelected(bodyTypeToLabel(req.Body.Type))
-	if req.Body.Type == model.BodyNone || req.Body.Type == "" {
-		rt.bodyEntry.Hide()
-	}
-	if req.Body.Type != model.BodyXML {
-		formatBtn.Hide()
-	}
+	rt.showBodyEditor(req.Body.Type, formatBtn)
 
+	// All three editors live in the laid-out tree (a Stack); showBodyEditor
+	// toggles which one is visible, so a test walking the tree can always reach
+	// the form/multipart entries.
+	editors := container.NewStack(
+		rt.bodyEntry,
+		rt.formTable.container,
+		rt.multipartTable.container,
+	)
 	return container.NewBorder(
 		container.NewHBox(widget.NewLabel("Body type:"), rt.bodyTypeSel, formatBtn),
 		nil, nil, nil,
-		rt.bodyEntry,
+		editors,
 	)
+}
+
+// showBodyEditor makes exactly the editor for body type t visible (text entry for
+// JSON/XML/Text, the Form or Multipart table for those types, nothing for None)
+// and shows the Format button only for XML.
+func (rt *requestTab) showBodyEditor(t model.BodyType, formatBtn *widget.Button) {
+	rt.bodyEntry.Hide()
+	rt.formTable.container.Hide()
+	rt.multipartTable.container.Hide()
+	switch t {
+	case model.BodyForm:
+		rt.formTable.container.Show()
+	case model.BodyMultipart:
+		rt.multipartTable.container.Show()
+	case model.BodyNone, "":
+		// nothing visible
+	default: // JSON / XML / Text
+		rt.bodyEntry.Show()
+	}
+	if t == model.BodyXML {
+		formatBtn.Show()
+	} else {
+		formatBtn.Hide()
+	}
 }
 
 // formatXMLBody pretty-indents the current XML body in place using formatXML
@@ -301,17 +374,30 @@ func (rt *requestTab) current() model.Request {
 		captures = rt.testsTab.captures()
 		assertions = rt.testsTab.assertions()
 	}
+	// Body: Form/Multipart carry Fields (Content empty); the other types carry the
+	// text Content. Nil-guard the tables for an early construction-time commit.
+	bodyType := bodyTypeFromLabel(rt.bodyTypeSel.Selected)
+	body := model.Body{Type: bodyType}
+	switch bodyType {
+	case model.BodyForm:
+		if rt.formTable != nil {
+			body.Fields = rt.formTable.value()
+		}
+	case model.BodyMultipart:
+		if rt.multipartTable != nil {
+			body.Fields = rt.multipartTable.value()
+		}
+	default:
+		body.Content = rt.bodyEntry.Text
+	}
 	return model.Request{
-		Name:    rt.nameEntry.Text,
-		Method:  model.Method(strings.ToUpper(rt.methodSel.Text)),
-		URL:     urlBase,
-		Params:  rt.paramsTable.value(),
-		Headers: rt.headerTable.value(),
-		Auth:    rt.authEditor.value(),
-		Body: model.Body{
-			Type:    bodyTypeFromLabel(rt.bodyTypeSel.Selected),
-			Content: rt.bodyEntry.Text,
-		},
+		Name:       rt.nameEntry.Text,
+		Method:     model.Method(strings.ToUpper(rt.methodSel.Text)),
+		URL:        urlBase,
+		Params:     rt.paramsTable.value(),
+		Headers:    rt.headerTable.value(),
+		Auth:       rt.authEditor.value(),
+		Body:       body,
 		Options:    options,
 		Captures:   captures,
 		Assertions: assertions,
@@ -450,6 +536,9 @@ func (rt *requestTab) startSend() {
 	// Expand {{variable}} templates (URL, params, headers, body, auth) using the
 	// window's active environment + collection variables.
 	opts.Resolve = rt.win.varScope().Resolve
+	// OAuth 2.0 (issue #30): when a request resolves to AuthOAuth2, yonner asks
+	// this provider for a Bearer token (normally already cached from "Get Token").
+	opts.OAuth2Token = rt.win.oauth2TokenProvider()
 	// When the active environment defines a complete SSH jump host, dial every
 	// Request THROUGH it; otherwise opts.DialContext stays nil and the send uses
 	// the default transport unchanged.

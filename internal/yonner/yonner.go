@@ -10,6 +10,7 @@ package yonner
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -38,6 +39,14 @@ type Options struct {
 	// A nil Resolve is treated as the identity function, so requests are sent
 	// verbatim and existing behaviour is unchanged.
 	Resolve func(string) string
+	// OAuth2Token, when non-nil, resolves an OAuth 2.0 Auth (Kind AuthOAuth2)
+	// into a Bearer access token just before the request is built. The UI
+	// supplies it backed by the OAuth token manager (cached/refreshed token);
+	// the core stays UI-free and network-free here. A nil provider, a nil
+	// config, or an empty returned token sends no Authorization header; a
+	// non-nil error from the provider fails BuildWith so the send surfaces the
+	// OAuth problem.
+	OAuth2Token func(*model.OAuth2Config) (string, error)
 	// DialContext, when non-nil, replaces the transport's TCP dialer so every
 	// Request is dialed THROUGH it instead of straight from this host. The
 	// tunnel manager supplies the SSH-backed dialer for the active Environment's
@@ -138,12 +147,12 @@ func BuildWith(ctx context.Context, req model.Request, coll model.Collection, op
 		return nil, err
 	}
 
-	// Body: WYSIWYG — send for any method when present. Resolve the content so
-	// {{variable}} templates in the body are expanded on the wire.
-	var body io.Reader
-	hasBody := req.Body.Type != model.BodyNone && req.Body.Content != ""
-	if hasBody {
-		body = strings.NewReader(opts.resolve(req.Body.Content))
+	// Body: WYSIWYG — send for any method when present. buildBodyReader resolves
+	// {{variable}} templates and reports the Content-Type the body type implies
+	// (applied below only when the user did not set one explicitly).
+	body, autoContentType, err := buildBodyReader(req.Body, opts.resolve)
+	if err != nil {
+		return nil, err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, string(req.Method), finalURL, body)
@@ -184,19 +193,28 @@ func BuildWith(ctx context.Context, req model.Request, coll model.Collection, op
 			httpReq.SetBasicAuth(opts.resolve(auth.Username), opts.resolve(auth.Password))
 		case model.AuthBearer:
 			httpReq.Header.Set(headerAuthorization, "Bearer "+opts.resolve(auth.Token))
+		case model.AuthOAuth2:
+			// OAuth 2.0: the injected provider returns a (cached/refreshed)
+			// access token, sent as a Bearer. A nil provider/config or empty
+			// token sends nothing; a provider error fails the build.
+			if opts.OAuth2Token != nil && auth.OAuth2 != nil {
+				tok, err := opts.OAuth2Token(auth.OAuth2)
+				if err != nil {
+					return nil, fmt.Errorf("oauth2: %w", err)
+				}
+				if tok != "" {
+					httpReq.Header.Set(headerAuthorization, "Bearer "+tok)
+				}
+			}
 		default:
 			// "none" / "inherit"-resolved-to-none: send no Authorization.
 		}
 	}
 
-	// JSON auto Content-Type, only when present and not user-overridden.
-	if hasBody && req.Body.Type == model.BodyJSON && !userSetContentType {
-		httpReq.Header.Set(headerContentType, "application/json")
-	}
-
-	// XML auto Content-Type, only when present and not user-overridden.
-	if hasBody && req.Body.Type == model.BodyXML && !userSetContentType {
-		httpReq.Header.Set(headerContentType, "application/xml")
+	// Automatic Content-Type from the body type (JSON/XML/form/multipart), only
+	// when the body implies one and the user did not set Content-Type explicitly.
+	if autoContentType != "" && !userSetContentType {
+		httpReq.Header.Set(headerContentType, autoContentType)
 	}
 
 	return httpReq, nil

@@ -1,15 +1,24 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"image"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 )
 
 // newTestServer mounts the real mux on an httptest server and returns it plus a
@@ -95,6 +104,85 @@ func TestBearerAuth(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&m)
 	if resp.StatusCode != 200 || m["authenticated"] != true {
 		t.Fatalf("good token: code=%d m=%v", resp.StatusCode, m)
+	}
+}
+
+// TestOAuthClientCredentials exercises the #30 token endpoint end-to-end: it
+// issues a token for valid client_credentials presented either as an HTTP Basic
+// header (Yon's default client-auth style) or in the body, rejects bad
+// credentials and the wrong grant, and the issued token unlocks /oauth/protected
+// while a bogus token does not.
+func TestOAuthClientCredentials(t *testing.T) {
+	srv, c := newTestServer(t)
+
+	tokenURL := srv.URL + "/oauth/token"
+	postToken := func(setup func(*http.Request)) (int, map[string]any) {
+		form := url.Values{"grant_type": {"client_credentials"}, "scope": {"read"}}
+		req, _ := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		setup(req)
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("POST /oauth/token: %v", err)
+		}
+		defer resp.Body.Close()
+		var m map[string]any
+		json.NewDecoder(resp.Body).Decode(&m)
+		return resp.StatusCode, m
+	}
+
+	// Basic-header client auth → 200 + the demo token.
+	code, m := postToken(func(req *http.Request) { req.SetBasicAuth(demoOAuthClientID, demoOAuthClientSecret) })
+	if code != 200 || m["access_token"] != demoOAuthToken || m["token_type"] != "Bearer" {
+		t.Fatalf("basic-auth token: code=%d m=%v", code, m)
+	}
+
+	// Body client auth (client_id/client_secret in the form) → 200 + the token.
+	code, m = postToken(func(req *http.Request) {
+		form := url.Values{"grant_type": {"client_credentials"}, "client_id": {demoOAuthClientID}, "client_secret": {demoOAuthClientSecret}}
+		req.Body = io.NopCloser(strings.NewReader(form.Encode()))
+		req.ContentLength = int64(len(form.Encode()))
+	})
+	if code != 200 || m["access_token"] != demoOAuthToken {
+		t.Fatalf("body-auth token: code=%d m=%v", code, m)
+	}
+
+	// Bad client secret → 401 invalid_client, no token.
+	if code, m := postToken(func(req *http.Request) { req.SetBasicAuth(demoOAuthClientID, "wrong") }); code != 401 || m["error"] != "invalid_client" {
+		t.Fatalf("bad secret: code=%d m=%v, want 401 invalid_client", code, m)
+	}
+
+	// Wrong grant_type → 400 unsupported_grant_type.
+	{
+		form := url.Values{"grant_type": {"password"}}
+		req, _ := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth(demoOAuthClientID, demoOAuthClientSecret)
+		resp, _ := c.Do(req)
+		var mm map[string]any
+		json.NewDecoder(resp.Body).Decode(&mm)
+		resp.Body.Close()
+		if resp.StatusCode != 400 || mm["error"] != "unsupported_grant_type" {
+			t.Fatalf("wrong grant: code=%d m=%v, want 400 unsupported_grant_type", resp.StatusCode, mm)
+		}
+	}
+
+	// The issued token unlocks the protected resource…
+	protURL := srv.URL + "/oauth/protected"
+	if code, m := getJSON(t, c, protURL); code != 401 || m["authenticated"] != false {
+		t.Fatalf("protected without token: code=%d m=%v, want 401", code, m)
+	}
+	req, _ := http.NewRequest(http.MethodGet, protURL, nil)
+	req.Header.Set("Authorization", "Bearer "+demoOAuthToken)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var pm map[string]any
+	json.NewDecoder(resp.Body).Decode(&pm)
+	if resp.StatusCode != 200 || pm["authenticated"] != true {
+		t.Fatalf("protected with token: code=%d m=%v", resp.StatusCode, pm)
 	}
 }
 
@@ -246,6 +334,361 @@ func TestSOAP_ReturnsNamespacedEnvelope(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("SOAP body missing %q:\n%s", want, body)
 		}
+	}
+}
+
+// TestImageEndpoints_DecodeWithCorrectType confirms each image endpoint serves a
+// real, decodable image under the expected Content-Type (the authoritative path
+// Yon's classifyBody uses), at the advertised 240×160 size.
+func TestImageEndpoints_DecodeWithCorrectType(t *testing.T) {
+	srv, c := newTestServer(t)
+	cases := []struct {
+		path, wantCT, wantFormat string
+	}{
+		{"/image/png", "image/png", "png"},
+		{"/image/jpeg", "image/jpeg", "jpeg"},
+		{"/image/gif", "image/gif", "gif"},
+	}
+	for _, tc := range cases {
+		resp, err := c.Get(srv.URL + tc.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tc.path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if ct := resp.Header.Get("Content-Type"); ct != tc.wantCT {
+			t.Errorf("%s Content-Type = %q, want %q", tc.path, ct, tc.wantCT)
+		}
+		cfg, format, err := image.DecodeConfig(bytes.NewReader(body))
+		if err != nil {
+			t.Errorf("%s: image.DecodeConfig: %v", tc.path, err)
+			continue
+		}
+		if format != tc.wantFormat {
+			t.Errorf("%s decoded as %q, want %q", tc.path, format, tc.wantFormat)
+		}
+		if cfg.Width != 240 || cfg.Height != 160 {
+			t.Errorf("%s = %dx%d, want 240x160", tc.path, cfg.Width, cfg.Height)
+		}
+	}
+}
+
+// TestImageOctet_IsDecodablePNGUnderGenericType serves a PNG as
+// application/octet-stream — the magic-byte-sniffing path. The body must still be
+// a decodable PNG even though the type gives nothing away.
+func TestImageOctet_IsDecodablePNGUnderGenericType(t *testing.T) {
+	srv, c := newTestServer(t)
+	resp, err := c.Get(srv.URL + "/image/octet")
+	if err != nil {
+		t.Fatalf("GET /image/octet: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want application/octet-stream", ct)
+	}
+	if _, format, err := image.DecodeConfig(bytes.NewReader(body)); err != nil || format != "png" {
+		t.Errorf("octet body decode: format=%q err=%v, want png/nil", format, err)
+	}
+}
+
+// TestPDFEndpoints_ValidPDF checks both PDF endpoints return a structurally sane
+// PDF: the %PDF- header, an %%EOF trailer, and a startxref. (A malformed PDF
+// would not open from Yon's PDF panel.)
+func TestPDFEndpoints_ValidPDF(t *testing.T) {
+	srv, c := newTestServer(t)
+	cases := []struct{ path, wantCT string }{
+		{"/pdf", "application/pdf"},
+		{"/pdf/octet", "application/octet-stream"},
+	}
+	for _, tc := range cases {
+		resp, err := c.Get(srv.URL + tc.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tc.path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if ct := resp.Header.Get("Content-Type"); ct != tc.wantCT {
+			t.Errorf("%s Content-Type = %q, want %q", tc.path, ct, tc.wantCT)
+		}
+		if !bytes.HasPrefix(body, []byte("%PDF-")) {
+			t.Errorf("%s missing %%PDF- header", tc.path)
+		}
+		if !bytes.Contains(body, []byte("startxref")) || !bytes.Contains(body, []byte("%%EOF")) {
+			t.Errorf("%s missing startxref/%%%%EOF trailer", tc.path)
+		}
+	}
+}
+
+// TestTextBM_StaysTextNotImage pins the #16 regression at the wire level: the
+// body begins with "BM" (BMP's signature) but is served as text/plain, so Yon
+// must keep it text. Here we assert the server contract the fix relies on.
+func TestTextBM_StaysTextNotImage(t *testing.T) {
+	srv, c := newTestServer(t)
+	resp, err := c.Get(srv.URL + "/text-bm")
+	if err != nil {
+		t.Fatalf("GET /text-bm: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("Content-Type = %q, want text/plain", ct)
+	}
+	if !bytes.HasPrefix(body, []byte("BM")) {
+		t.Errorf("body should start with the BMP-signature prefix \"BM\"; got %q", body[:min(8, len(body))])
+	}
+}
+
+// TestFormEcho_URLEncoded posts an application/x-www-form-urlencoded body and
+// checks the fields are echoed and the files slice is empty.
+func TestFormEcho_URLEncoded(t *testing.T) {
+	srv, c := newTestServer(t)
+	form := url.Values{}
+	form.Set("name", "yon")
+	form.Set("lang", "go")
+
+	resp, err := c.Post(srv.URL+"/form", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatalf("POST /form: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var m map[string]any
+	json.NewDecoder(resp.Body).Decode(&m)
+
+	fields, _ := m["fields"].(map[string]any)
+	if fields["name"] != "yon" || fields["lang"] != "go" {
+		t.Fatalf("fields not echoed: %v", fields)
+	}
+	files, _ := m["files"].([]any)
+	if len(files) != 0 {
+		t.Fatalf("files = %v, want empty", files)
+	}
+	if cnt, _ := m["fieldCount"].(float64); int(cnt) != 2 {
+		t.Fatalf("fieldCount = %v, want 2", m["fieldCount"])
+	}
+}
+
+// TestFormEcho_Multipart posts a multipart/form-data body with two text fields
+// and one file part, and checks the text fields are echoed and the files slice
+// reports the file's field name, filename, and size.
+func TestFormEcho_Multipart(t *testing.T) {
+	srv, c := newTestServer(t)
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("title", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.WriteField("tag", "http"); err != nil {
+		t.Fatal(err)
+	}
+	fw, err := mw.CreateFormFile("upload", "hello.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const fileContent = "throw a request, catch a response"
+	if _, err := io.WriteString(fw, fileContent); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := c.Post(srv.URL+"/form", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST /form: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var m map[string]any
+	json.NewDecoder(resp.Body).Decode(&m)
+
+	fields, _ := m["fields"].(map[string]any)
+	if fields["title"] != "hello" || fields["tag"] != "http" {
+		t.Fatalf("text fields not echoed: %v", fields)
+	}
+	files, _ := m["files"].([]any)
+	if len(files) != 1 {
+		t.Fatalf("files = %v, want one entry", files)
+	}
+	f, _ := files[0].(map[string]any)
+	if f["field"] != "upload" {
+		t.Errorf("file field = %v, want upload", f["field"])
+	}
+	if f["filename"] != "hello.txt" {
+		t.Errorf("file filename = %v, want hello.txt", f["filename"])
+	}
+	if size, _ := f["size"].(float64); int(size) != len(fileContent) {
+		t.Errorf("file size = %v, want %d", f["size"], len(fileContent))
+	}
+}
+
+// TestUsersCRUD exercises the in-memory /users resource (#51) end-to-end:
+// create → get → patch → delete → 404, plus the seeded list.
+func TestUsersCRUD(t *testing.T) {
+	srv, c := newTestServer(t)
+	base := srv.URL + "/users"
+
+	// Seeded list has the two starter users.
+	code, m := getJSON(t, c, base)
+	if code != 200 {
+		t.Fatalf("GET /users = %d, want 200", code)
+	}
+	if cnt, _ := m["count"].(float64); int(cnt) != 2 {
+		t.Fatalf("seeded count = %v, want 2", m["count"])
+	}
+
+	// Create.
+	resp, err := c.Post(base, "application/json", strings.NewReader(`{"name":"Grace Hopper","email":"grace@example.com"}`))
+	if err != nil {
+		t.Fatalf("POST /users: %v", err)
+	}
+	var created map[string]any
+	json.NewDecoder(resp.Body).Decode(&created)
+	resp.Body.Close()
+	if resp.StatusCode != 201 {
+		t.Fatalf("POST /users = %d, want 201", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc == "" {
+		t.Errorf("POST /users missing Location header")
+	}
+	idF, _ := created["id"].(float64)
+	id := strconv.Itoa(int(idF))
+	if int(idF) != 3 {
+		t.Errorf("created id = %v, want 3 (next after seeds)", created["id"])
+	}
+
+	// Get the created user.
+	code, got := getJSON(t, c, base+"/"+id)
+	if code != 200 || got["name"] != "Grace Hopper" {
+		t.Fatalf("GET /users/%s = %d %v", id, code, got)
+	}
+
+	// Patch only the email.
+	preq, _ := http.NewRequest(http.MethodPatch, base+"/"+id, strings.NewReader(`{"email":"grace2@example.com"}`))
+	preq.Header.Set("Content-Type", "application/json")
+	presp, err := c.Do(preq)
+	if err != nil {
+		t.Fatalf("PATCH /users/%s: %v", id, err)
+	}
+	var patched map[string]any
+	json.NewDecoder(presp.Body).Decode(&patched)
+	presp.Body.Close()
+	if presp.StatusCode != 200 || patched["email"] != "grace2@example.com" || patched["name"] != "Grace Hopper" {
+		t.Fatalf("PATCH result = %d %v (name should be unchanged, email updated)", presp.StatusCode, patched)
+	}
+
+	// Delete → 204.
+	dreq, _ := http.NewRequest(http.MethodDelete, base+"/"+id, nil)
+	dresp, err := c.Do(dreq)
+	if err != nil {
+		t.Fatalf("DELETE /users/%s: %v", id, err)
+	}
+	dresp.Body.Close()
+	if dresp.StatusCode != 204 {
+		t.Fatalf("DELETE /users/%s = %d, want 204", id, dresp.StatusCode)
+	}
+
+	// Now gone → 404.
+	if code, _ := getJSON(t, c, base+"/"+id); code != 404 {
+		t.Fatalf("GET deleted /users/%s = %d, want 404", id, code)
+	}
+
+	// A non-numeric id → 400.
+	if code, _ := getJSON(t, c, base+"/abc"); code != 400 {
+		t.Fatalf("GET /users/abc = %d, want 400", code)
+	}
+}
+
+// TestCookies covers /cookies/set (Set-Cookie) and /cookies (echo).
+func TestCookies(t *testing.T) {
+	srv, c := newTestServer(t)
+
+	resp, err := c.Get(srv.URL + "/cookies/set?name=token&value=abc123")
+	if err != nil {
+		t.Fatalf("GET /cookies/set: %v", err)
+	}
+	resp.Body.Close()
+	var setCookie string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "token" {
+			setCookie = ck.Value
+		}
+	}
+	if setCookie != "abc123" {
+		t.Fatalf("Set-Cookie token = %q, want abc123", setCookie)
+	}
+
+	// Echo a cookie we send.
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/cookies", nil)
+	req.AddCookie(&http.Cookie{Name: "token", Value: "abc123"})
+	er, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("GET /cookies: %v", err)
+	}
+	var m map[string]any
+	json.NewDecoder(er.Body).Decode(&m)
+	er.Body.Close()
+	cookies, _ := m["cookies"].(map[string]any)
+	if cookies["token"] != "abc123" {
+		t.Fatalf("echoed cookies = %v, want token=abc123", cookies)
+	}
+}
+
+// TestGzip confirms /gzip returns a gzip-encoded JSON body. The request sets
+// Accept-Encoding: gzip explicitly so Go's transport does not transparently
+// decompress it, letting the test verify the bytes are really gzipped.
+func TestGzip(t *testing.T) {
+	srv, c := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/gzip", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("GET /gzip: %v", err)
+	}
+	defer resp.Body.Close()
+	if ce := resp.Header.Get("Content-Encoding"); ce != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", ce)
+	}
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	defer gz.Close()
+	var m map[string]any
+	if err := json.NewDecoder(gz).Decode(&m); err != nil {
+		t.Fatalf("decode gunzipped JSON: %v", err)
+	}
+	if m["gzipped"] != true {
+		t.Fatalf("decompressed body = %v, want gzipped:true", m)
+	}
+}
+
+// TestDebugEcho confirms /debug reflects method, headers, query, and body.
+func TestDebugEcho(t *testing.T) {
+	srv, c := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/debug?x=1", strings.NewReader("hello-body"))
+	req.Header.Set("X-Probe", "yon")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("POST /debug: %v", err)
+	}
+	defer resp.Body.Close()
+	var m map[string]any
+	json.NewDecoder(resp.Body).Decode(&m)
+	if m["method"] != "POST" || m["body"] != "hello-body" {
+		t.Fatalf("debug method/body wrong: %v", m)
+	}
+	if q, _ := m["query"].(map[string]any); q["x"] != "1" {
+		t.Fatalf("debug query = %v, want x=1", m["query"])
+	}
+	if h, _ := m["headers"].(map[string]any); h["X-Probe"] != "yon" {
+		t.Fatalf("debug headers missing X-Probe: %v", m["headers"])
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 
 	"github.com/ultramcu/yon/internal/model"
 	"github.com/ultramcu/yon/internal/postresp"
+	"github.com/ultramcu/yon/internal/updater"
 )
 
 // maxDisplayBytes caps how much of a response body is rendered on screen. Larger
@@ -107,10 +108,53 @@ type responseView struct {
 	bodyList  *widget.List
 	bodyLines []string
 
-	// bodyStack holds both viewers; renderBody shows exactly one of bodyScroll
-	// (the TextGrid) or bodyList depending on body size.
+	// bodyStack holds the body viewers; renderBody shows exactly ONE of:
+	// bodyScroll (small/Raw TextGrid), bodyList (large body), bodyImageScroll (an
+	// image preview) or bodyPDF (a PDF panel). The kind is chosen by
+	// classifyBody(contentType, fullBody) — see renderBody.
 	bodyStack  *fyne.Container
 	bodyScroll *container.Scroll
+
+	// bodyImage previews an image response (issue #16). It is built per-response
+	// from rv.fullBody (canvas.NewImageFromResource over a static resource),
+	// scaled to fit (ImageFillContain) inside bodyImageScroll so a large image
+	// scrolls rather than forcing the pane open. The scroll is added to bodyStack
+	// only while the image is the active viewer and removed by hideImage, so a
+	// later text/PDF response leaves no *canvas.Image in the tree. Both fields are
+	// nil when no image is shown. For an image the Pretty/Raw toggle means: Pretty
+	// = the image preview, Raw = the raw-bytes text viewer (bytes stay inspectable).
+	bodyImage       *canvas.Image
+	bodyImageScroll *container.Scroll
+
+	// previewBytes is the byte slice the currently-shown image preview was built
+	// from, and the bytes its right-click "Save image…" writes (issue #37). For a
+	// real image body (issue #16) it is rv.fullBody; for a base64 image it is the
+	// DECODED image, so Save writes the decoded image, not the encoded base64 text.
+	// nil when no image is previewed. showImageBytes sets it; hideImage clears it.
+	previewBytes []byte
+
+	// base64Decoded is the base64-image opt-in state for an ambiguous bare-base64
+	// body (issue #37, base64Bare). It starts false so a new response renders as
+	// text; the "Decode as image" button flips it true to preview the decoded
+	// image, and "Show text" flips it back. setResponse/clearBody reset it so a new
+	// response starts un-decoded. It is meaningful only while renderBody sees a
+	// base64Bare body; decodeBtn is shown only then.
+	base64Decoded bool
+	decodeBtn     *widget.Button
+
+	// baseMeta is the status/time/size meta line WITHOUT any base64 decode note,
+	// so renderBody can append "· decoded from base64 · W×H" when auto-previewing a
+	// data-URI image (issue #37) and drop it again on the Raw toggle, without
+	// re-deriving duration/size. setResponse fills it; renderBody reads it.
+	baseMeta string
+
+	// bodyPDF previews a PDF response: an icon, a "PDF document · <size>" label
+	// and Save…/Open buttons. yon does not render PDF pages itself (no new deps);
+	// the panel hands the bytes to the OS via Open (updater.OpenFile to a temp
+	// file) or Save Output As…. Like the image preview it is inserted into
+	// bodyStack only while active and removed by hidePDF; nil when no PDF is shown.
+	bodyPDF      *fyne.Container
+	bodyPDFLabel *widget.Label
 
 	// respTabs is the Body/Headers/Tests segmented sub-tab control (same component
 	// as the request editor). Body is the default tab and gives bodyStack the full
@@ -177,6 +221,13 @@ func newResponseView(parent fyne.Window) *responseView {
 	rv.popoutBtn.Importance = widget.LowImportance
 	rv.popoutBtn.Hide()
 
+	// "Decode as image" / "Show text" opt-in toggle for an ambiguous bare-base64
+	// image body (issue #37, base64Bare). Hidden until renderBody detects such a
+	// body; toggleBase64Decode flips base64Decoded and re-renders.
+	rv.decodeBtn = widget.NewButton(base64DecodeLabel, rv.toggleBase64Decode)
+	rv.decodeBtn.Importance = widget.LowImportance
+	rv.decodeBtn.Hide()
+
 	rv.noticeLabel = widget.NewLabel("")
 	rv.noticeLabel.Hide()
 
@@ -225,7 +276,7 @@ func newResponseView(parent fyne.Window) *responseView {
 	// Save (when truncated) · Copy · Pretty | Raw — a single flat row pinned right
 	// (adjacent Pretty/Raw buttons read as a segmented control).
 	right := container.New(layout.NewHBoxLayout(),
-		rv.popoutBtn, rv.saveBtn, rv.copyBtn, rv.prettyBtn, rv.rawBtn)
+		rv.decodeBtn, rv.popoutBtn, rv.saveBtn, rv.copyBtn, rv.prettyBtn, rv.rawBtn)
 	headerRow := container.NewBorder(nil, nil, left, right)
 
 	rv.find = newFindBar(
@@ -240,7 +291,12 @@ func newResponseView(parent fyne.Window) *responseView {
 	// Body content: the coloured TextGrid (small bodies, scrolled) stacked with
 	// the lightweight List (large bodies). renderBody shows exactly one. UNCHANGED
 	// perf architecture — only its surrounding layout differs.
-	rv.bodyScroll = container.NewVScroll(rv.bodyGrid)
+	rv.bodyScroll = container.NewScroll(rv.bodyGrid)
+
+	// The image preview and PDF panel (issue #16) are built lazily and inserted
+	// into bodyStack only while they are the active viewer, then removed again —
+	// so a text or PDF response leaves no *canvas.Image in the tree, and the
+	// default bodyStack is exactly {bodyScroll, bodyList} (the perf architecture).
 	rv.bodyStack = container.NewStack(rv.bodyScroll, rv.bodyList)
 
 	// Body / Headers sub-tabs (same segTabs component as the request editor) so the
@@ -248,11 +304,11 @@ func newResponseView(parent fyne.Window) *responseView {
 	// tab; the response HEADERS (key cyan / value) move into the Headers tab.
 	rv.respTabs = newSegTabs()
 	rv.respTabs.Append("Body", rv.bodyStack)
-	rv.headersSeg = rv.respTabs.Append("Headers", container.NewVScroll(rv.headersGrid))
+	rv.headersSeg = rv.respTabs.Append("Headers", container.NewScroll(rv.headersGrid))
 	// Tests tab: a scrollable VBox that setTestResults fills with the assertion
 	// pass/fail rows + captured values + a summary line. Starts empty/neutral.
 	rv.testsBox = container.NewVBox()
-	rv.testsSeg = rv.respTabs.Append("Tests", container.NewVScroll(rv.testsBox))
+	rv.testsSeg = rv.respTabs.Append("Tests", container.NewScroll(rv.testsBox))
 
 	rv.container = container.NewBorder(header, nil, nil, nil, rv.respTabs.object())
 
@@ -398,6 +454,10 @@ func (rv *responseView) setError(err error) {
 func (rv *responseView) setResponse(resp model.Response) {
 	rv.fullBody = resp.Body
 	rv.contentType = contentTypeOf(resp.Headers)
+	// A new response starts un-decoded: reset the base64 opt-in so a previous
+	// "Decode as image" choice never carries over (issue #37). renderBody re-shows
+	// the button if this body is itself an ambiguous bare-base64 image.
+	rv.base64Decoded = false
 	rv.copyBtn.Show()
 	rv.saveBtn.Show()
 	rv.popoutBtn.Show()
@@ -405,8 +465,19 @@ func (rv *responseView) setResponse(resp model.Response) {
 	rv.statusLabel.Text = fmt.Sprintf("%d %s", resp.Status, resp.StatusText)
 	rv.applyStatusPill(statusColor(resp.Status))
 
-	rv.metaLabel.SetText(fmt.Sprintf("   %s   ·   %s",
-		formatDuration(resp.Duration), formatSize(resp.Size)))
+	meta := fmt.Sprintf("   %s   ·   %s",
+		formatDuration(resp.Duration), formatSize(resp.Size))
+	// Issue #16: append the pixel dimensions of an image response, when readable
+	// (PNG/JPEG/GIF; WebP/BMP preview but report no size via image.DecodeConfig).
+	if classifyBody(rv.contentType, rv.fullBody) == bodyKindImage {
+		if w, h, ok := imageDimensions(rv.fullBody); ok {
+			meta += fmt.Sprintf("   ·   %d×%d", w, h)
+		}
+	}
+	// Remember the base meta so renderBody can append/drop the base64 decode note
+	// across Pretty/Raw toggles without re-deriving it (issue #37).
+	rv.baseMeta = meta
+	rv.metaLabel.SetText(meta)
 
 	rv.renderHeaders(resp.Headers)
 	rv.renderBody()
@@ -676,6 +747,40 @@ func (rv *responseView) renderBody() {
 		return
 	}
 
+	// Issue #16: route binary bodies to a preview instead of raw bytes. An image
+	// shows the image preview in Pretty mode and the raw-bytes text view in Raw
+	// mode (so the bytes stay inspectable); a PDF always shows the PDF panel. Find
+	// keeps the text path so matches can be highlighted.
+	if !rv.findActive {
+		kind := classifyBody(rv.contentType, rv.fullBody)
+		switch kind {
+		case bodyKindImage:
+			if rv.pretty {
+				rv.noticeLabel.Hide()
+				rv.showImage()
+				return
+			}
+			// Raw on an image: fall through to the text path (raw bytes).
+		case bodyKindPDF:
+			rv.noticeLabel.Hide()
+			rv.showPDF()
+			return
+		}
+
+		// Issue #37: a textual body may itself be a base64-encoded image. Only run
+		// the (cheap) detection when the body isn't already a raw image/PDF, to
+		// avoid double work, and only outside Find (handled by the guard above).
+		if kind == bodyKindText {
+			if rv.renderBase64() {
+				return
+			}
+		} else {
+			rv.hideDecodeButton()
+		}
+	} else {
+		rv.hideDecodeButton()
+	}
+
 	body := rv.fullBody
 	truncated := false
 	if len(body) > maxDisplayBytes {
@@ -729,6 +834,8 @@ func (rv *responseView) renderBody() {
 func (rv *responseView) showSmallBody(display string, kind bodyKind) {
 	rv.bodyLines = nil
 	rv.bodyList.Hide()
+	rv.hideImage()
+	rv.hidePDF()
 
 	switch kind {
 	case kindJSON:
@@ -750,6 +857,8 @@ func (rv *responseView) showSmallBody(display string, kind bodyKind) {
 func (rv *responseView) showLargeBody(display string) {
 	rv.bodyGrid.SetText("")
 	rv.bodyScroll.Hide()
+	rv.hideImage()
+	rv.hidePDF()
 
 	rv.bodyLines = strings.Split(display, "\n")
 	rv.bodyList.Refresh()
@@ -757,23 +866,157 @@ func (rv *responseView) showLargeBody(display string) {
 	rv.bodyList.Show()
 }
 
-// clearBody resets both Body viewers to empty.
+// clearBody resets every Body viewer to empty and shows the (empty) TextGrid —
+// so a stale image or PDF preview never lingers behind a later text response or a
+// pending/error state.
 func (rv *responseView) clearBody() {
 	rv.bodyLines = nil
 	rv.bodyGrid.SetText("")
 	rv.bodyList.Refresh()
 	rv.bodyList.Hide()
+	rv.hideImage()
+	rv.hidePDF()
+	// Reset the base64 opt-in and hide its button so a stale "Decode as image"
+	// affordance never lingers behind a later text/pending/error state (issue #37).
+	rv.base64Decoded = false
+	if rv.decodeBtn != nil {
+		rv.decodeBtn.Hide()
+	}
 	rv.bodyScroll.Show()
 }
 
-// saveToFile writes the full (un-truncated) body to a user-chosen file via a
-// native OS save dialog, falling back to Fyne's in-app dialog if unavailable.
-func (rv *responseView) saveToFile() {
+// hideImage removes the image preview from the body stack (so no *canvas.Image
+// lingers in the tree behind a later response) and drops its backing bytes.
+func (rv *responseView) hideImage() {
+	if rv.bodyImageScroll != nil {
+		rv.removeFromStack(rv.bodyImageScroll)
+		rv.bodyImageScroll = nil
+	}
+	rv.bodyImage = nil
+	rv.previewBytes = nil
+}
+
+// hidePDF removes the PDF panel from the body stack.
+func (rv *responseView) hidePDF() {
+	if rv.bodyPDF != nil {
+		rv.removeFromStack(rv.bodyPDF)
+		rv.bodyPDF = nil
+		rv.bodyPDFLabel = nil
+	}
+}
+
+// removeFromStack drops obj from bodyStack.Objects (no-op if absent) and refreshes.
+func (rv *responseView) removeFromStack(obj fyne.CanvasObject) {
+	objs := rv.bodyStack.Objects[:0]
+	for _, o := range rv.bodyStack.Objects {
+		if o != obj {
+			objs = append(objs, o)
+		}
+	}
+	rv.bodyStack.Objects = objs
+	rv.bodyStack.Refresh()
+}
+
+// showImage builds an image preview from the full response body and makes it the
+// visible Body viewer, hiding the text viewers and removing any PDF panel. The
+// preview is inserted into bodyStack only while it is active (and removed by
+// hideImage), so a later text/PDF response leaves no image behind. The image is
+// wrapped in a fresh static resource so canvas.Image loads the new bytes.
+func (rv *responseView) showImage() {
+	rv.showImageBytes(rv.fullBody)
+}
+
+// showImageBytes builds the image preview from b (the raw body for a real image,
+// or the DECODED bytes for a base64 image — issue #37) and makes it the visible
+// Body viewer, hiding the text viewers and removing any PDF panel. It records b
+// as rv.previewBytes so the right-click "Save image…" writes exactly the bytes on
+// screen (the decoded image, not the encoded base64 text). The preview is
+// inserted into bodyStack only while active (removed by hideImage), so a later
+// text/PDF response leaves no image behind. The image is wrapped in a fresh
+// static resource so canvas.Image loads the new bytes.
+func (rv *responseView) showImageBytes(b []byte) {
+	rv.bodyLines = nil
+	rv.bodyGrid.SetText("")
+	rv.bodyScroll.Hide()
+	rv.bodyList.Hide()
+	rv.hidePDF()
+	rv.hideImage() // drop a previous image before building the new one
+
+	rv.previewBytes = b
+	rv.bodyImage = canvas.NewImageFromResource(fyne.NewStaticResource("response", b))
+	rv.bodyImage.FillMode = canvas.ImageFillContain
+	rv.bodyImage.SetMinSize(fyne.NewSize(120, 120))
+	// Wrap the preview so a right-click offers "Save image…". The wrapper renders
+	// exactly rv.bodyImage (widget.NewSimpleRenderer), so the *canvas.Image stays
+	// reachable by a tree walk — issue #16's visibleImages still finds it.
+	wrapped := newImagePreview(rv.bodyImage, rv.saveImage)
+	rv.bodyImageScroll = container.NewScroll(container.NewCenter(wrapped))
+
+	rv.bodyStack.Add(rv.bodyImageScroll)
+	rv.bodyStack.Refresh()
+}
+
+// showPDF builds the PDF panel and makes it the visible Body viewer, hiding the
+// text viewers and removing any image preview. Like the image preview the panel
+// is inserted into bodyStack only while active.
+func (rv *responseView) showPDF() {
+	rv.bodyLines = nil
+	rv.bodyGrid.SetText("")
+	rv.bodyScroll.Hide()
+	rv.bodyList.Hide()
+	rv.hideImage()
+	rv.hidePDF() // rebuild fresh so the size line tracks the current body
+
+	rv.bodyPDF = rv.buildPDFPanel()
+	rv.bodyPDFLabel.SetText(fmt.Sprintf("PDF document  ·  %s", formatSize(int64(len(rv.fullBody)))))
+
+	rv.bodyStack.Add(rv.bodyPDF)
+	rv.bodyStack.Refresh()
+}
+
+// buildPDFPanel constructs the static PDF preview panel: a "PDF" glyph, a size
+// label and Save…/Open buttons. yon ships no PDF renderer (no new deps); the
+// panel offers Save Output As… (reusing saveToFile, defaulting response.pdf) and
+// Open, which writes the bytes to a temp file and hands it to the OS default app
+// (updater.OpenFile: macOS `open`, Linux `xdg-open`, Windows `start`).
+//
+// The panel deliberately uses text-only widgets (no widget.Icon / icon buttons,
+// each of which renders a canvas.Image): the only *canvas.Image the body region
+// ever holds is a genuine image preview, so "is an image being previewed?" stays
+// answerable by scanning the body for a canvas.Image.
+func (rv *responseView) buildPDFPanel() *fyne.Container {
+	glyph := canvas.NewText("PDF", theme.Color(theme.ColorNamePlaceHolder))
+	glyph.TextStyle = fyne.TextStyle{Bold: true}
+	glyph.TextSize = theme.TextSize() * 2
+	glyph.Alignment = fyne.TextAlignCenter
+
+	rv.bodyPDFLabel = widget.NewLabel("PDF document")
+	rv.bodyPDFLabel.Alignment = fyne.TextAlignCenter
+
+	saveBtn := widget.NewButton("Save…", rv.savePDF)
+	openBtn := widget.NewButton("Open", rv.openPDF)
+	saveBtn.Importance = widget.HighImportance
+	buttons := container.NewHBox(layout.NewSpacer(), saveBtn, openBtn, layout.NewSpacer())
+
+	col := container.NewVBox(
+		layout.NewSpacer(),
+		container.NewCenter(glyph),
+		rv.bodyPDFLabel,
+		buttons,
+		layout.NewSpacer(),
+	)
+	return container.NewCenter(col)
+}
+
+// savePDF writes the full PDF body to a user-chosen file, defaulting the name to
+// response.pdf (reusing the same native/Fyne save path as Save Output As…).
+func (rv *responseView) savePDF() {
 	if rv.fullBody == nil {
 		return
 	}
 	go func() {
-		path, ok, err := nativeSaveAny("Save Response Body", "response.txt")
+		path, ok, err := nativeSaveAny("Save PDF",
+			responseDefaultFilename(rv.contentType, rv.fullBody))
 		fyne.Do(func() {
 			switch {
 			case err != nil:
@@ -787,6 +1030,112 @@ func (rv *responseView) saveToFile() {
 			}
 		})
 	}()
+}
+
+// openPDF writes the body to a temp .pdf and opens it in the OS default viewer
+// (updater.OpenFile). The temp file is left for the viewer to read (cleaning it
+// up immediately would race the launcher); the OS tempdir is reclaimed by the
+// system. Errors surface in a dialog.
+func (rv *responseView) openPDF() {
+	if rv.fullBody == nil {
+		return
+	}
+	go func() {
+		f, err := os.CreateTemp("", "yon-response-*.pdf")
+		if err == nil {
+			_, err = f.Write(rv.fullBody)
+			cerr := f.Close()
+			if err == nil {
+				err = cerr
+			}
+		}
+		if err == nil {
+			err = updater.OpenFile(f.Name())
+		}
+		if err != nil {
+			fyne.Do(func() { dialog.ShowError(err, rv.parent) })
+		}
+	}()
+}
+
+// saveToFile writes the full (un-truncated) body to a user-chosen file via a
+// native OS save dialog, falling back to Fyne's in-app dialog if unavailable.
+func (rv *responseView) saveToFile() {
+	if rv.fullBody == nil {
+		return
+	}
+	go func() {
+		path, ok, err := nativeSaveAny("Save Response Body",
+			responseDefaultFilename(rv.contentType, rv.fullBody))
+		fyne.Do(func() {
+			switch {
+			case err != nil:
+				rv.saveToFileFyne()
+			case !ok:
+				// cancelled
+			default:
+				if werr := os.WriteFile(path, rv.fullBody, 0o644); werr != nil {
+					dialog.ShowError(werr, rv.parent)
+				}
+			}
+		})
+	}()
+}
+
+// saveImage writes the full image body to a user-chosen file, defaulting the
+// filename to the format-correct responseDefaultFilename (e.g. response.png /
+// response.jpg). It reuses the same native/Fyne save path as saveToFile and
+// shares its Fyne in-app fallback on a native-dialog error. Invoked from the
+// "Save image…" right-click menu on the inline image preview.
+func (rv *responseView) saveImage() {
+	// Save the bytes that are actually on screen: the raw body for a real image
+	// (issue #16), or the DECODED image for a base64 body (issue #37). previewBytes
+	// is set by showImageBytes and tracks the visible preview.
+	data := rv.previewBytes
+	if data == nil {
+		data = rv.fullBody
+	}
+	if data == nil {
+		return
+	}
+	// Pick the filename from the bytes on screen. For a base64 image the response
+	// Content-Type is textual (text/plain, or a data: URI's wrapper), which would
+	// classify the decoded bytes as text; passing the bytes alone lets
+	// responseDefaultFilename sniff the real image magic and choose response.<ext>.
+	ct := rv.contentType
+	if rv.previewBytes != nil && classifyBody(ct, data) != bodyKindImage {
+		ct = ""
+	}
+	go func() {
+		path, ok, err := nativeSaveAny("Save Image",
+			responseDefaultFilename(ct, data))
+		fyne.Do(func() {
+			switch {
+			case err != nil:
+				rv.saveImageFyne(data)
+			case !ok:
+				// cancelled
+			default:
+				if werr := os.WriteFile(path, data, 0o644); werr != nil {
+					dialog.ShowError(werr, rv.parent)
+				}
+			}
+		})
+	}()
+}
+
+// saveImageFyne is the Fyne in-app fallback for saveImage(), writing the visible
+// preview bytes (decoded image for base64, raw body otherwise).
+func (rv *responseView) saveImageFyne(data []byte) {
+	dialog.ShowFileSave(func(wc fyne.URIWriteCloser, err error) {
+		if err != nil || wc == nil {
+			return
+		}
+		defer wc.Close()
+		if _, werr := wc.Write(data); werr != nil {
+			dialog.ShowError(werr, rv.parent)
+		}
+	}, rv.parent)
 }
 
 // saveToFileFyne is the Fyne in-app fallback for saveToFile().
@@ -834,7 +1183,7 @@ func (rv *responseView) showPopout() {
 	// Find view: a TextGrid that supports match highlighting, shown only while
 	// find is open. It overlays the entry in a Stack; one is hidden at a time.
 	grid := widget.NewTextGrid()
-	gridScroll := container.NewVScroll(grid)
+	gridScroll := container.NewScroll(grid)
 	gridScroll.Hide()
 
 	var search gridSearch
@@ -890,6 +1239,48 @@ func (rv *responseView) showPopout() {
 	win.Resize(fyne.NewSize(960, 720))
 	addFindShortcuts(win, openFind, closeFind)
 	win.Show()
+}
+
+// imagePreview wraps the inline response image (a *canvas.Image) so a right-click
+// offers a "Save image…" context menu. It renders exactly the wrapped image via
+// widget.NewSimpleRenderer, so the *canvas.Image stays a reachable child in the
+// rendered tree — issue #16's image-walk (visibleImages over rv.bodyStack) still
+// finds the preview. It is only built in showImage, so the menu never appears for
+// a text or PDF response.
+type imagePreview struct {
+	widget.BaseWidget
+	img    *canvas.Image
+	onSave func()
+}
+
+// newImagePreview builds the right-clickable wrapper around img; onSave runs when
+// the "Save image…" menu item is chosen.
+func newImagePreview(img *canvas.Image, onSave func()) *imagePreview {
+	p := &imagePreview{img: img, onSave: onSave}
+	p.ExtendBaseWidget(p)
+	return p
+}
+
+// CreateRenderer renders the wrapped image directly, keeping the *canvas.Image a
+// reachable child of the widget tree.
+func (p *imagePreview) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(p.img)
+}
+
+// TappedSecondary shows a one-item "Save image…" context menu at the click point,
+// mirroring the sidebar's right-click idiom (verbRow.TappedSecondary).
+func (p *imagePreview) TappedSecondary(e *fyne.PointEvent) {
+	items := []*fyne.MenuItem{
+		fyne.NewMenuItem("Save image…", func() {
+			if p.onSave != nil {
+				p.onSave()
+			}
+		}),
+	}
+	menu := fyne.NewMenu("", items...)
+	if c := fyne.CurrentApp().Driver().CanvasForObject(p); c != nil {
+		widget.ShowPopUpMenuAtPosition(menu, c, e.AbsolutePosition)
+	}
 }
 
 // statusColor maps an HTTP status code to its class colour.

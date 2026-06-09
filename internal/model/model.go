@@ -52,6 +52,9 @@ const (
 	AuthBasic AuthKind = "basic"
 	// AuthBearer is bearer-token auth using Token.
 	AuthBearer AuthKind = "bearer"
+	// AuthOAuth2 obtains a token via an OAuth 2.0 flow (issue #30) and sends it as
+	// a Bearer token; the flow is configured in Auth.OAuth2.
+	AuthOAuth2 AuthKind = "oauth2"
 )
 
 // Auth describes the authentication for a Request or Collection. Only the
@@ -62,6 +65,55 @@ type Auth struct {
 	Username string   `json:"username,omitempty"`
 	Password string   `json:"password,omitempty"`
 	Token    string   `json:"token,omitempty"`
+	// OAuth2 holds the OAuth 2.0 configuration when Kind is AuthOAuth2 (issue
+	// #30). nil + omitempty keeps an Auth that predates OAuth2 byte-identical on
+	// disk. The obtained tokens are NOT stored here — they are session/runtime
+	// state held by the OAuth token manager; the client secret is a secret that
+	// belongs in the gitignored .env, not the committed .yon.
+	OAuth2 *OAuth2Config `json:"oauth2,omitempty"`
+}
+
+// OAuth2Grant identifies which OAuth 2.0 grant flow an OAuth2Config uses.
+type OAuth2Grant string
+
+// OAuth 2.0 grant types Yon supports.
+const (
+	// GrantClientCredentials is the client_credentials grant (server-to-server,
+	// no browser): POST the token endpoint with the client id/secret.
+	GrantClientCredentials OAuth2Grant = "client_credentials"
+	// GrantAuthorizationCode is the authorization_code grant (user-delegated):
+	// open the auth URL in a browser, catch the code on a loopback redirect, and
+	// exchange it for tokens. PKCE is used when OAuth2Config.UsePKCE is set.
+	GrantAuthorizationCode OAuth2Grant = "authorization_code"
+)
+
+// OAuth2ClientAuthStyle selects how client credentials are presented to the
+// token endpoint.
+type OAuth2ClientAuthStyle string
+
+const (
+	// OAuth2ClientAuthBasic sends the client id/secret as an HTTP Basic
+	// Authorization header (the default and most widely supported).
+	OAuth2ClientAuthBasic OAuth2ClientAuthStyle = "basic"
+	// OAuth2ClientAuthBody sends client_id/client_secret as POST body params.
+	OAuth2ClientAuthBody OAuth2ClientAuthStyle = "body"
+)
+
+// OAuth2Config is the OAuth 2.0 configuration for an Auth of Kind AuthOAuth2.
+// Only the configuration lives here (and in the .yon); the ClientSecret is a
+// secret (kept out of the committed file, in .env) and the obtained tokens are
+// session state. {{variables}} are allowed in the URL/ID/scope fields.
+type OAuth2Config struct {
+	Grant        OAuth2Grant           `json:"grant"`
+	TokenURL     string                `json:"tokenUrl"`
+	AuthURL      string                `json:"authUrl,omitempty"` // authorization_code only
+	ClientID     string                `json:"clientId,omitempty"`
+	ClientSecret string                `json:"clientSecret,omitempty"` // secret → .env, not committed
+	Scopes       string                `json:"scopes,omitempty"`       // space-separated
+	Audience     string                `json:"audience,omitempty"`     // extra "audience" param when set
+	RedirectURI  string                `json:"redirectUri,omitempty"`  // authorization_code loopback, e.g. http://127.0.0.1:0/callback
+	UsePKCE      bool                  `json:"usePkce,omitempty"`      // authorization_code: PKCE S256
+	ClientAuth   OAuth2ClientAuthStyle `json:"clientAuth,omitempty"`   // "" = basic
 }
 
 // Param is a key/value pair with an Enabled flag, used for both query
@@ -88,13 +140,37 @@ const (
 	// BodyXML means the body is XML; the sender adds an "application/xml"
 	// Content-Type unless one is already set.
 	BodyXML BodyType = "xml"
+	// BodyForm is an application/x-www-form-urlencoded body built from the
+	// enabled Body.Fields (key/value pairs); the sender adds the matching
+	// Content-Type unless one is already set. Fields' Content is ignored.
+	BodyForm BodyType = "form"
+	// BodyMultipart is a multipart/form-data body built from the enabled
+	// Body.Fields: text parts and (for fields with IsFile) file parts read from
+	// the field Value path at send time. The sender adds the multipart
+	// Content-Type (with its generated boundary) unless one is already set.
+	BodyMultipart BodyType = "multipart"
 )
 
+// FormField is one part of a BodyForm or BodyMultipart body: a key/value pair
+// with an Enabled flag (disabled fields are kept but not sent), mirroring Param.
+// For BodyMultipart, IsFile marks the field as a file part whose Value is a
+// filesystem path read at send time; Filename overrides the part's filename
+// (defaulting to the path's basename). IsFile/Filename are ignored for BodyForm.
+type FormField struct {
+	Key      string `json:"key"`
+	Value    string `json:"value"`
+	Enabled  bool   `json:"enabled"`
+	IsFile   bool   `json:"isFile,omitempty"`
+	Filename string `json:"filename,omitempty"`
+}
+
 // Body is the payload of a Request. It is held on every Request regardless of
-// Method and is sent as-is when Content is non-empty.
+// Method and is sent as-is when Content is non-empty. For BodyForm/BodyMultipart
+// the payload is built from Fields instead of Content.
 type Body struct {
-	Type    BodyType `json:"type"`
-	Content string   `json:"content,omitempty"`
+	Type    BodyType    `json:"type"`
+	Content string      `json:"content,omitempty"`
+	Fields  []FormField `json:"fields,omitempty"`
 }
 
 // Folder is a one-level-deep grouping of Requests within a Collection. Folders
@@ -263,6 +339,12 @@ type Collection struct {
 	ActiveEnvironment string     `json:"activeEnvironment,omitempty"`
 	Folders           []Folder   `json:"folders,omitempty"`
 	Requests          []Request  `json:"requests,omitempty"`
+	// Environments are environments stored INLINE in the .yon file (issue #35),
+	// as opposed to the default sibling-file storage (the .environments/
+	// directory + .env). omitempty keeps a collection with no inline
+	// environments byte-identical on disk. An environment lives in exactly one
+	// place — here OR a sibling file, never both.
+	Environments []Environment `json:"environments,omitempty"`
 }
 
 // Response is the result of sending a Request. It is read-only data: status,

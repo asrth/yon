@@ -4,6 +4,117 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-06-09
+
+### Changed
+- Maintenance release with no functional changes — published to exercise the
+  in-app one-click updater introduced in 2.0.0 (it needs a newer release to
+  update to).
+
+## [2.0.0] - 2026-06-09
+
+### Added
+- **One-click app update** ([#41]) — *Check for Updates…* can now **download,
+  verify, replace the installed app, and relaunch** in a single click on macOS.
+  The downloaded build is verified as Yon's notarized, Developer ID–signed
+  release (pinned Team ID) before the installed `/Applications/Yon.app` is
+  replaced by an atomic swap and the new version relaunches. Any failure, or an
+  app that is not eligible (not signed, or not in a writable install location),
+  falls back to the previous download-and-open flow. The macOS swap is fully
+  atomic via `renamex_np(RENAME_SWAP)` ([#54]), so the app is never left in a
+  half-replaced state.
+- **More bundled test-server endpoints** ([#51]) — `testserver/` gains an
+  in-memory `/users` CRUD resource, `/cookies` (set + echo), a gzip-encoded
+  `/gzip`, and a request-echo `/debug`, with matching requests in
+  `testserver.yon`.
+
+## [1.5.0] - 2026-06-09
+
+### Added
+- **OAuth 2.0 authentication** ([#30]) — a new **OAuth 2.0** auth type supporting
+  the **client credentials** and **authorization code (with PKCE)** grants.
+  Configure the token/authorization URLs, client id/secret, scopes, audience,
+  redirect URI and client-auth style; a **Get Token** button fetches and caches
+  an access token (refreshing when possible), and requests send it as a `Bearer`.
+  The authorization-code flow opens the browser and catches the redirect on a
+  loopback listener with state/CSRF validation. `{{variables}}` are resolved in
+  the configuration before each grant and send.
+- **Form request bodies** ([#48]) — new **Form**
+  (`application/x-www-form-urlencoded`) and **Multipart** (`multipart/form-data`)
+  body types, edited as a key/value field table. Multipart additionally supports
+  **file-part uploads**: mark a row as a file and pick a path, and the file is
+  read and sent at request time. The cURL view and cURL import understand
+  `--data-urlencode` and `-F` (including `-F field=@file` uploads).
+
+## [1.4.3] - 2026-06-07
+
+### Added
+- **Store an environment inside the `.yon`** ([#35]) — the environment manager
+  has a **"Store inside .yon"** checkbox so an environment can travel inside the
+  committable collection file instead of a sibling file. A warning explains that
+  inline values (including secrets) are committed; new environments default to
+  the sibling-file storage. Toggling the checkbox migrates the environment
+  between the two (it always lives in exactly one place).
+
+### Changed
+- **Saving warns before overwriting external edits** ([#40]) — if the open
+  `.yon` was changed on disk since Yon read it (by another tool, `git`, a
+  script), Save now prompts **Overwrite / Reload / Cancel** instead of silently
+  clobbering the change.
+
+## [1.4.2] - 2026-06-07
+
+### Fixed
+- The **Variables** panel no longer stretches wide and gets stuck when a value
+  is long (e.g. a captured JWT token) ([#36]) — it now scrolls horizontally, so
+  a long value scrolls inside the panel and the window can be resized down
+  freely. (Same fix as [#32] for the response pane.)
+
+## [1.4.1] - 2026-06-06
+
+### Fixed
+- A response with a very long line (e.g. a JWT token) no longer forces the
+  window wider with no way to shrink it back ([#32]) — the response Body,
+  Headers and Tests panes (and the pop-out window) now scroll horizontally, so a
+  long line scrolls inside the pane and the window's minimum size stays bounded.
+
+## [1.4.0] - 2026-06-06
+
+### Added
+- **Import OpenAPI / Swagger** ([#27]) — **File ▸ Import OpenAPI / Swagger…**
+  reads an OpenAPI 3.x or Swagger 2.0 document (YAML or JSON) and builds a
+  collection: operations become requests grouped by tag into folders, the
+  server URL becomes a `{{baseUrl}}` variable, parameters and an example JSON
+  body are filled in, and security schemes map to auth (Bearer/Basic; an API key
+  becomes a header/query parameter). Anything unsupported is listed in an import
+  report.
+
+## [1.3.0] - 2026-06-06
+
+### Added
+- **Right-click an image response to save it** ([#24]) — the inline image preview
+  now has a **Save image…** context menu that writes the full image to a file.
+- **Correct default filenames on save** ([#24]) — *Save Output As…*, the PDF
+  panel's *Save…*, and the new image save all suggest a name with the right
+  extension for the response (`response.png` / `.jpg` / `.gif` / `.webp` / `.bmp`
+  / `.pdf`, falling back to `.txt`), instead of always `response.txt`.
+
+## [1.2.0] - 2026-06-06
+
+### Added
+- **Image & PDF response previews** ([#16]) — when a response is an image
+  (`image/*`, or detected from its magic bytes), Yon renders it inline, scaled to
+  fit, with the pixel dimensions in the response meta line; **Raw** still shows the
+  exact bytes. A **PDF** response (`application/pdf` or a `%PDF-` signature) shows a
+  panel with **Save…** and **Open** (Open hands the file to your OS viewer). No PDF
+  renderer or third-party dependency is added. An explicit textual `Content-Type` is
+  always trusted, so a text body that merely starts with `BM`/`GIF8`/`%PDF-` is never
+  mistaken for a binary.
+
+### Changed
+- **Tunnels…** moved from the *Collection* menu to the **View** menu ([#15]), next
+  to Variables and Request Log — it opens a window, like the other View items.
+
 ## [1.1.1] - 2026-06-05
 
 ### Fixed
@@ -383,13 +494,16 @@ First stable release. New home: the project moved to
 [#2]: https://github.com/asrth/yon/issues/2
 [#8]: https://github.com/asrth/yon/issues/8
 [#11]: https://github.com/asrth/yon/issues/11
-[#21]: https://github.com/ultramcu/yon/issues/21
-[#22]: https://github.com/ultramcu/yon/issues/22
-[#23]: https://github.com/ultramcu/yon/issues/23
-[#24]: https://github.com/ultramcu/yon/issues/24
-[#25]: https://github.com/ultramcu/yon/issues/25
-[#26]: https://github.com/ultramcu/yon/issues/26
-[#27]: https://github.com/ultramcu/yon/issues/27
-[#28]: https://github.com/ultramcu/yon/issues/28
-[#29]: https://github.com/ultramcu/yon/issues/29
-[#30]: https://github.com/ultramcu/yon/issues/30
+[#15]: https://github.com/asrth/yon/issues/15
+[#16]: https://github.com/asrth/yon/issues/16
+[#24]: https://github.com/asrth/yon/issues/24
+[#27]: https://github.com/asrth/yon/issues/27
+[#32]: https://github.com/asrth/yon/issues/32
+[#36]: https://github.com/asrth/yon/issues/36
+[#35]: https://github.com/asrth/yon/issues/35
+[#40]: https://github.com/asrth/yon/issues/40
+[#30]: https://github.com/asrth/yon/issues/30
+[#48]: https://github.com/asrth/yon/issues/48
+[#41]: https://github.com/asrth/yon/issues/41
+[#51]: https://github.com/asrth/yon/issues/51
+[#54]: https://github.com/asrth/yon/issues/54

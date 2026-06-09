@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -38,6 +39,13 @@ type Window struct {
 
 	// dirty is true when the in-memory Collection differs from disk.
 	dirty bool
+
+	// loadedStamp is the on-disk stamp (modtime+size) of path as Yon last read
+	// or wrote it. It is set in newWindow for an on-disk collection and refreshed
+	// after every successful save, so fileChangedOnDisk can detect an external
+	// edit that a silent Save would clobber. Zero value for an untitled
+	// collection (path == "").
+	loadedStamp store.FileStamp
 
 	sidebar *widget.List
 	tabs    *tabStrip
@@ -112,11 +120,16 @@ type Window struct {
 	// startSend the first time a Capture writes a value.
 	runtimeVars map[string]string
 
-	// envs holds the environments loaded from the collection's sibling files
-	// (empty for an unsaved collection). envSelect is the sidebar-header picker
-	// that chooses the active environment; pendingEnvDeletes queues environment
-	// files to remove on the next manager Save (set by Rename/Delete).
+	// envs holds the environments loaded for the collection — the merged set of
+	// inline environments (stored in the committable .yon) and sibling-file
+	// environments (empty for an unsaved collection). inlineEnvs reports which of
+	// those names are currently stored inline, so the manager can seed its
+	// per-row "Store inside .yon" checkbox and persistEnvironments can tell which
+	// location a deleted environment lived in. envSelect is the sidebar-header
+	// picker that chooses the active environment; pendingEnvDeletes queues
+	// environment names to remove on the next manager Save (set by Rename/Delete).
 	envs              []model.Environment
+	inlineEnvs        map[string]bool
 	envSelect         *widget.Select
 	pendingEnvDeletes []string
 
@@ -182,6 +195,13 @@ func newWindow(app *App, coll model.Collection, path string) *Window {
 	}
 	w.win = app.fyneApp.NewWindow("")
 	w.win.SetIcon(appIcon)
+
+	// Record the on-disk stamp of the backing file so a later Save can detect an
+	// external edit and prompt instead of silently clobbering it. Untitled
+	// collections have no file (and no stamp) until Save As adopts a path.
+	if path != "" {
+		w.loadedStamp, _ = store.StatStamp(path)
+	}
 
 	w.loadEnvironments()
 	w.buildSidebar()
@@ -1265,6 +1285,7 @@ func (w *Window) buildMainMenu() *fyne.MainMenu {
 		fyne.NewMenuItem("New", func() { w.app.NewCollectionWindow() }),
 		fyne.NewMenuItem("Open…", w.open),
 		fyne.NewMenuItem("Import Collection (JSON)…", w.importCollection),
+		fyne.NewMenuItem("Import OpenAPI / Swagger…", w.importOpenAPI),
 		fyne.NewMenuItem("New Request from cURL…", w.newRequestFromCurl),
 		w.recentMenuItem(),
 		fyne.NewMenuItemSeparator(),
@@ -1421,6 +1442,20 @@ func (w *Window) save(done func(bool)) {
 		w.saveAs(done)
 		return
 	}
+	// The file changed on disk since Yon read/wrote it: a plain Save would
+	// silently clobber that external edit (the data-loss bug). Prompt instead.
+	if w.fileChangedOnDisk() {
+		w.confirmOverwriteChanged(done)
+		return
+	}
+	w.writeToCurrentPath(done)
+}
+
+// writeToCurrentPath saves the in-memory Collection to w.path, refreshes the
+// loaded stamp, and does the usual dirty/title bookkeeping. Callers must have
+// already confirmed it is safe to overwrite (path set, no unresolved external
+// change). done (may be nil) reports success.
+func (w *Window) writeToCurrentPath(done func(bool)) {
 	if err := store.Save(w.path, w.coll); err != nil {
 		dialog.ShowError(err, w.win)
 		if done != nil {
@@ -1428,12 +1463,61 @@ func (w *Window) save(done func(bool)) {
 		}
 		return
 	}
+	w.loadedStamp, _ = store.StatStamp(w.path)
 	w.dirty = false
 	w.clearTabsDirty()
 	w.updateTitle()
 	if done != nil {
 		done(true)
 	}
+}
+
+// confirmOverwriteChanged warns that w.path changed on disk since it was opened
+// and offers three choices: Overwrite (write the in-memory copy, losing the
+// external edit), Reload (discard the in-memory copy and reopen the disk
+// version in a fresh window, closing this one), or Cancel (do nothing). It must
+// run on the UI thread. done (may be nil) reports whether a save happened.
+func (w *Window) confirmOverwriteChanged(done func(bool)) {
+	msg := widget.NewLabel(
+		"This collection's file changed on disk since it was opened.\n" +
+			"Saving now would overwrite those external changes.\n\n" +
+			"Choose what to do:",
+	)
+	msg.Wrapping = fyne.TextWrapWord
+
+	var d dialog.Dialog
+	overwrite := widget.NewButtonWithIcon("Overwrite", theme.WarningIcon(), func() {
+		d.Hide()
+		w.writeToCurrentPath(done)
+	})
+	overwrite.Importance = widget.DangerImportance
+	reload := widget.NewButtonWithIcon("Reload from disk", theme.ViewRefreshIcon(), func() {
+		d.Hide()
+		// Discard the in-memory copy: reopen the disk version in a fresh window,
+		// then close this one. Nothing is saved.
+		if err := w.app.OpenPath(w.path); err != nil {
+			dialog.ShowError(err, w.win)
+			if done != nil {
+				done(false)
+			}
+			return
+		}
+		w.win.Close()
+		if done != nil {
+			done(false)
+		}
+	})
+	cancel := widget.NewButton("Cancel", func() {
+		d.Hide()
+		if done != nil {
+			done(false)
+		}
+	})
+
+	buttons := container.NewHBox(layout.NewSpacer(), cancel, reload, overwrite)
+	content := container.NewVBox(msg, buttons)
+	d = dialog.NewCustomWithoutButtons("File changed on disk", content, w.win)
+	d.Show()
 }
 
 // saveAs prompts for a path (native dialog, Fyne fallback) and saves there,
@@ -1485,6 +1569,7 @@ func (w *Window) saveToPath(path string, done func(bool)) {
 		return
 	}
 	w.path = path
+	w.loadedStamp, _ = store.StatStamp(path)
 	w.dirty = false
 	w.clearTabsDirty()
 	w.updateTitle()
@@ -1493,6 +1578,18 @@ func (w *Window) saveToPath(path string, done func(bool)) {
 	if done != nil {
 		done(true)
 	}
+}
+
+// fileChangedOnDisk reports whether the collection's file exists and its
+// on-disk stamp differs from what Yon last read/wrote — i.e. an external edit
+// Yon would clobber on Save. False for an untitled collection or a missing file
+// (nothing to clobber).
+func (w *Window) fileChangedOnDisk() bool {
+	if w.path == "" {
+		return false
+	}
+	stamp, ok := store.StatStamp(w.path)
+	return ok && stamp != w.loadedStamp
 }
 
 // ---- Sidebar verb-chip row ----
