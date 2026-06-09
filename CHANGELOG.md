@@ -4,6 +4,13 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-06-09
+
+### Changed
+- Maintenance release with no functional changes — published to exercise the
+  in-app one-click updater introduced in 2.0.0 (it needs a newer release to
+  update to).
+
 ## [2.0.0] - 2026-06-09
 
 ### Added
