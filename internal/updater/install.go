@@ -12,6 +12,10 @@ package updater
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 // expectedTeamID is the Apple Developer Team ID the self-updater requires the
@@ -53,8 +57,21 @@ func ExpectedTeamID() string { return expectedTeamID }
 //
 // LANE C owns this function.
 func locateAppBundle(exePath string) (bundle string, ok bool) {
-	// TODO(LANE C): walk the path components up to the one ending in ".app".
-	return "", false
+	// Walk parent directories from exePath upward, returning the first component
+	// whose name ends in ".app". This handles both the executable itself and any
+	// nested path inside the bundle, and is filepath.Separator-aware via
+	// filepath.Dir / filepath.Base.
+	for p := exePath; ; {
+		if strings.HasSuffix(filepath.Base(p), ".app") {
+			return p, true
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			// Reached the filesystem root without finding a ".app" component.
+			return "", false
+		}
+		p = parent
+	}
 }
 
 // CanAutoInstall reports the installed .app bundle and whether an in-place update
@@ -65,9 +82,42 @@ func locateAppBundle(exePath string) (bundle string, ok bool) {
 //
 // LANE C owns this function.
 func CanAutoInstall() (bundle string, ok bool) {
-	// TODO(LANE C): os.Executable -> resolve symlinks -> locateAppBundle ->
-	// require expectedTeamID != "" and a writable bundle.
-	return "", false
+	// Dev / plain `go build` builds have no pinned Team ID: never self-replace.
+	if expectedTeamID == "" {
+		return "", false
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", false
+	}
+	// Resolve symlinks so a symlinked launcher still maps back to the real
+	// .app bundle on disk.
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	bundle, ok = locateAppBundle(exe)
+	if !ok {
+		return "", false
+	}
+	// The atomic swap renames the bundle within its PARENT directory, so the
+	// parent (e.g. /Applications) must be writable by the current user.
+	if !dirWritable(filepath.Dir(bundle)) {
+		return "", false
+	}
+	return bundle, true
+}
+
+// dirWritable reports whether dir is writable by the current user by attempting
+// to create (and immediately remove) a temp file in it.
+func dirWritable(dir string) bool {
+	f, err := os.CreateTemp(dir, ".yon-write-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	f.Close()
+	os.Remove(name)
+	return true
 }
 
 // autoInstallWith runs the verify -> swap -> relaunch sequence for installedBundle
@@ -78,9 +128,27 @@ func CanAutoInstall() (bundle string, ok bool) {
 //
 // LANE C owns this function.
 func autoInstallWith(ctx context.Context, deps installDeps, dmgPath, installedBundle string, progress func(string)) error {
-	// TODO(LANE C): mount -> defer cleanup -> verifyNotarizedBundle ->
-	// swapAppBundle -> relaunch, reporting progress and returning the first error.
-	return ErrAutoInstallUnsupported
+	reportProgress(progress, "Mounting update…")
+	appPath, cleanup, err := deps.mount(ctx, dmgPath)
+	if err != nil {
+		return fmt.Errorf("updater: mount update: %w", err)
+	}
+	defer cleanup()
+
+	// Verify BEFORE touching the installed app: any failure here leaves the
+	// current installation completely untouched.
+	reportProgress(progress, "Verifying signature…")
+	if err := verifyNotarizedBundle(ctx, deps.run, appPath); err != nil {
+		return fmt.Errorf("updater: verify update: %w", err)
+	}
+
+	reportProgress(progress, "Installing…")
+	if err := swapAppBundle(ctx, deps.run, appPath, installedBundle); err != nil {
+		return fmt.Errorf("updater: install update: %w", err)
+	}
+
+	reportProgress(progress, "Relaunching…")
+	return deps.relaunch(installedBundle)
 }
 
 // reportProgress calls progress if non-nil (small helper for the orchestrator).
