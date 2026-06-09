@@ -6,6 +6,8 @@ package oauth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -211,6 +213,50 @@ func TestAcBTCtxCancel(t *testing.T) {
 	}
 	if time.Since(start) > 3*time.Second {
 		t.Errorf("ctx cancel took %v; want prompt", time.Since(start))
+	}
+}
+
+// 7. PKCE S256 binding + redirect_uri binding. The advertised code_challenge
+// must equal base64url(sha256(code_verifier)) sent at the exchange (RFC 7636
+// §4.2 — S256, not a "plain" challenge mislabelled S256), AND the redirect_uri
+// at the exchange must be byte-identical to the one advertised in the auth URL
+// (RFC 6749 §4.1.3). Both are recomputed from the wire here, so a PKCE
+// downgrade or a redirect mismatch fails the test instead of slipping through.
+func TestAcBTPKCES256AndRedirectBinding(t *testing.T) {
+	var hits int32
+	var form url.Values
+	srv := acBTTokenServer(t, &hits, &form, func() string {
+		return acBTjson(map[string]any{"access_token": "AT", "token_type": "Bearer"})
+	})
+	defer srv.Close()
+
+	cfg := model.OAuth2Config{Grant: model.GrantAuthorizationCode, AuthURL: "https://auth.example/authorize", TokenURL: srv.URL, ClientID: "cid", UsePKCE: true}
+
+	var advertisedChallenge, advertisedRedirect string
+	open := acBTRedirectingOpener(t, "CODE", "", func(q url.Values) {
+		advertisedChallenge = q.Get("code_challenge")
+		advertisedRedirect = q.Get("redirect_uri")
+		if q.Get("code_challenge_method") != "S256" {
+			t.Errorf("code_challenge_method = %q; want S256", q.Get("code_challenge_method"))
+		}
+	})
+
+	if _, err := AuthorizationCodeToken(context.Background(), cfg, open); err != nil {
+		t.Fatalf("AuthorizationCodeToken: %v", err)
+	}
+
+	verifier := form.Get("code_verifier")
+	if verifier == "" {
+		t.Fatal("exchange missing code_verifier")
+	}
+	sum := sha256.Sum256([]byte(verifier))
+	want := base64.RawURLEncoding.EncodeToString(sum[:])
+	if advertisedChallenge != want {
+		t.Errorf("code_challenge = %q; want base64url(sha256(verifier)) = %q (PKCE must be a real S256 derivation)", advertisedChallenge, want)
+	}
+
+	if got := form.Get("redirect_uri"); got == "" || got != advertisedRedirect {
+		t.Errorf("exchange redirect_uri = %q; want it byte-identical to the advertised %q", got, advertisedRedirect)
 	}
 }
 
