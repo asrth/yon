@@ -60,6 +60,19 @@ func newMux() *http.ServeMux {
 	mux.HandleFunc("/oauth/protected", oauthProtected)
 	// form-data bodies (#48): echoes a urlencoded or multipart/form-data POST.
 	mux.HandleFunc("/form", formEcho)
+	// Test APIs (#51): an in-memory CRUD resource, cookies, gzip, and a
+	// request-echo debug endpoint.
+	users := newUserStore()
+	mux.HandleFunc("GET /users", users.list)
+	mux.HandleFunc("POST /users", users.create)
+	mux.HandleFunc("GET /users/{id}", users.get)
+	mux.HandleFunc("PUT /users/{id}", users.replace)
+	mux.HandleFunc("PATCH /users/{id}", users.update)
+	mux.HandleFunc("DELETE /users/{id}", users.remove)
+	mux.HandleFunc("/cookies/set", cookiesSet)
+	mux.HandleFunc("/cookies", cookiesEcho)
+	mux.HandleFunc("/gzip", gzipJSON)
+	mux.HandleFunc("/debug", debugEcho)
 	mux.HandleFunc("/status/{code}", status)
 	mux.HandleFunc("/redirect", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/get", http.StatusFound)
@@ -104,6 +117,7 @@ func newMux() *http.ServeMux {
 				"/get", "/post", "/put", "/delete", "/headers",
 				"/basic-auth/{user}/{pass}", "/bearer", "/status/{code}",
 				"/oauth/token", "/oauth/protected", "/form",
+				"/users", "/users/{id}", "/cookies/set", "/cookies", "/gzip", "/debug",
 				"/redirect", "/large", "/slow?seconds=N", "/json",
 				"/xml", "/html", "/soap",
 				"/image/png", "/image/jpeg", "/image/gif", "/image/octet",

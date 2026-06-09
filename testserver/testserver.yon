@@ -64,6 +64,10 @@
     {
       "id": "fform",
       "name": "Form & Multipart (#48)"
+    },
+    {
+      "id": "fapi",
+      "name": "Test APIs (#51)"
     }
   ],
   "requests": [
@@ -650,6 +654,149 @@
         ]
       },
       "folderId": "fform"
+    },
+    {
+      "name": "List users → /users (#51)",
+      "method": "GET",
+      "url": "{{baseUrl}}/users",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fapi"
+    },
+    {
+      "name": "Create user → /users — captures {{newUserId}} (step 1 of 2)",
+      "method": "POST",
+      "url": "{{baseUrl}}/users",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "json",
+        "content": "{\n  \"name\": \"Grace Hopper\",\n  \"email\": \"grace@example.com\"\n}"
+      },
+      "folderId": "fapi",
+      "captures": [
+        {
+          "variable": "newUserId",
+          "source": "jsonBody",
+          "expr": "$.id",
+          "enabled": true
+        }
+      ],
+      "assertions": [
+        {
+          "source": "status",
+          "op": "equals",
+          "expected": "201",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "name": "Get user → /users/{{newUserId}} (step 2 of 2)",
+      "method": "GET",
+      "url": "{{baseUrl}}/users/{{newUserId}}",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fapi",
+      "assertions": [
+        {
+          "source": "status",
+          "op": "equals",
+          "expected": "200",
+          "enabled": true
+        },
+        {
+          "source": "jsonBody",
+          "expr": "$.name",
+          "op": "equals",
+          "expected": "Grace Hopper",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "name": "Set cookie → /cookies/set",
+      "method": "GET",
+      "url": "{{baseUrl}}/cookies/set",
+      "params": [
+        {
+          "key": "name",
+          "value": "token",
+          "enabled": true
+        },
+        {
+          "key": "value",
+          "value": "abc123",
+          "enabled": true
+        }
+      ],
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fapi"
+    },
+    {
+      "name": "Echo cookies → /cookies",
+      "method": "GET",
+      "url": "{{baseUrl}}/cookies",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fapi"
+    },
+    {
+      "name": "gzip JSON → /gzip (transparent decompression)",
+      "method": "GET",
+      "url": "{{baseUrl}}/gzip",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      },
+      "folderId": "fapi"
+    },
+    {
+      "name": "Debug echo → /debug",
+      "method": "POST",
+      "url": "{{baseUrl}}/debug",
+      "params": [
+        {
+          "key": "x",
+          "value": "1",
+          "enabled": true
+        }
+      ],
+      "headers": [
+        {
+          "key": "X-Probe",
+          "value": "yon",
+          "enabled": true
+        }
+      ],
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "json",
+        "content": "{ \"ping\": \"pong\" }"
+      },
+      "folderId": "fapi"
     }
   ]
 }
