@@ -19,6 +19,15 @@ import (
 // The installed app is never left missing: every failure path either leaves the
 // original in place or restores it. Returns the first error encountered.
 //
+// KNOWN LIMITATION: the two-rename swap has a microsecond window between moving
+// the current install aside and moving the new one into place during which the
+// bundle path is momentarily absent (and, in the rare event the rollback rename
+// itself fails, the original remains at "<installedBundle>.old"). No data is
+// lost — ".old" is always preserved for manual recovery — but a process kill in
+// that window leaves the app un-launchable until ".old" is restored. A future
+// hardening can make this truly atomic on macOS via renamex_np(RENAME_SWAP)
+// (golang.org/x/sys/unix, already available); see issue #41 follow-ups.
+//
 // LANE B owns this file.
 func swapAppBundle(ctx context.Context, run cmdRunner, newBundle, installedBundle string) error {
 	// Staging and backup paths live in the same parent directory (and thus on the

@@ -131,14 +131,26 @@ func vfBTHappyMatchers() []vfBTMatcher {
 }
 
 func Test_vfBTVerifyNotarizedBundle(t *testing.T) {
-	t.Run("empty expected team id", func(t *testing.T) {
+	t.Run("empty expected team id refused before running any command", func(t *testing.T) {
 		old := expectedTeamID
 		defer func() { expectedTeamID = old }()
 		expectedTeamID = ""
 
-		run := vfBTFakeRunner(t, vfBTHappyMatchers())
-		if err := verifyNotarizedBundle(context.Background(), run, "/path/Yon.app"); err == nil {
-			t.Error("verifyNotarizedBundle should error when expectedTeamID is empty")
+		// Pin the guard precisely: an unpinned (dev) build must be refused with
+		// ErrAutoInstallUnsupported WITHOUT consulting codesign/spctl at all. A
+		// runner that fails the test if invoked proves the refusal short-circuits
+		// before any external command (so dropping the guard makes this fail even
+		// though a downstream team-id mismatch would otherwise mask it).
+		run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			t.Fatalf("verifyNotarizedBundle must refuse an unpinned build without running %q", name)
+			return nil, nil
+		}
+		err := verifyNotarizedBundle(context.Background(), run, "/path/Yon.app")
+		if err == nil {
+			t.Fatal("verifyNotarizedBundle should error when expectedTeamID is empty")
+		}
+		if !errors.Is(err, ErrAutoInstallUnsupported) {
+			t.Errorf("empty-teamID refusal should wrap ErrAutoInstallUnsupported; got %v", err)
 		}
 	})
 
