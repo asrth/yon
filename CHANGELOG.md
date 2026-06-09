@@ -4,6 +4,24 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-06-09
+
+### Added
+- **OAuth 2.0 authentication** ([#30]) — a new **OAuth 2.0** auth type supporting
+  the **client credentials** and **authorization code (with PKCE)** grants.
+  Configure the token/authorization URLs, client id/secret, scopes, audience,
+  redirect URI and client-auth style; a **Get Token** button fetches and caches
+  an access token (refreshing when possible), and requests send it as a `Bearer`.
+  The authorization-code flow opens the browser and catches the redirect on a
+  loopback listener with state/CSRF validation. `{{variables}}` are resolved in
+  the configuration before each grant and send.
+- **Form request bodies** ([#48]) — new **Form**
+  (`application/x-www-form-urlencoded`) and **Multipart** (`multipart/form-data`)
+  body types, edited as a key/value field table. Multipart additionally supports
+  **file-part uploads**: mark a row as a file and pick a path, and the file is
+  read and sent at request time. The cURL view and cURL import understand
+  `--data-urlencode` and `-F` (including `-F field=@file` uploads).
+
 ## [1.4.3] - 2026-06-07
 
 ### Added
@@ -460,3 +478,5 @@ First stable release. New home: the project moved to
 [#36]: https://github.com/asrth/yon/issues/36
 [#35]: https://github.com/asrth/yon/issues/35
 [#40]: https://github.com/asrth/yon/issues/40
+[#30]: https://github.com/asrth/yon/issues/30
+[#48]: https://github.com/asrth/yon/issues/48
