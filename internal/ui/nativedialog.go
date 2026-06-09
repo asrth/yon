@@ -23,6 +23,13 @@ func nativeOpenYon(title string) (string, bool, error) {
 	return nativeResult(zenity.SelectFile(zenity.Title(title), yonFilter))
 }
 
+// nativeOpenAny shows a native open dialog with no filter (any file type). Used
+// to pick a file for a multipart/form-data file part. It returns (path, ok, err)
+// like the other native wrappers.
+func nativeOpenAny(title string) (string, bool, error) {
+	return nativeResult(zenity.SelectFile(zenity.Title(title)))
+}
+
 // specFilter selects OpenAPI 3.0 / Swagger 2.0 spec files (YAML or JSON) in the
 // native open dialog.
 var specFilter = zenity.FileFilters{

@@ -58,6 +58,8 @@ func newMux() *http.ServeMux {
 	// resource, so the OAuth flow is exercisable end-to-end from testserver.yon.
 	mux.HandleFunc("/oauth/token", oauthToken)
 	mux.HandleFunc("/oauth/protected", oauthProtected)
+	// form-data bodies (#48): echoes a urlencoded or multipart/form-data POST.
+	mux.HandleFunc("/form", formEcho)
 	mux.HandleFunc("/status/{code}", status)
 	mux.HandleFunc("/redirect", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/get", http.StatusFound)
@@ -101,7 +103,7 @@ func newMux() *http.ServeMux {
 			"endpoints": []string{
 				"/get", "/post", "/put", "/delete", "/headers",
 				"/basic-auth/{user}/{pass}", "/bearer", "/status/{code}",
-				"/oauth/token", "/oauth/protected",
+				"/oauth/token", "/oauth/protected", "/form",
 				"/redirect", "/large", "/slow?seconds=N", "/json",
 				"/xml", "/html", "/soap",
 				"/image/png", "/image/jpeg", "/image/gif", "/image/octet",
@@ -214,6 +216,66 @@ func oauthProtected(w http.ResponseWriter, r *http.Request) {
 		"authenticated": true,
 		"via":           "oauth2 client_credentials",
 		"token":         token,
+	})
+}
+
+// formEcho echoes a posted form. It accepts POST with either an
+// application/x-www-form-urlencoded body or a multipart/form-data body (text
+// parts plus file parts). The response reports the request Content-Type, the
+// flattened text fields (first value per key), a list of any uploaded files
+// (field name, filename, size), and the number of text fields.
+func formEcho(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"error": "POST only",
+			"hint":  "POST application/x-www-form-urlencoded or multipart/form-data",
+		})
+		return
+	}
+
+	ct := r.Header.Get("Content-Type")
+	fields := map[string]string{}
+	files := []map[string]any{}
+
+	if strings.HasPrefix(ct, "multipart/form-data") {
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "parse multipart: " + err.Error()})
+			return
+		}
+		if r.MultipartForm != nil {
+			for k, vs := range r.MultipartForm.Value {
+				if len(vs) > 0 {
+					fields[k] = vs[0]
+				}
+			}
+			for field, headers := range r.MultipartForm.File {
+				for _, fh := range headers {
+					files = append(files, map[string]any{
+						"field":    field,
+						"filename": fh.Filename,
+						"size":     fh.Size,
+					})
+				}
+			}
+		}
+	} else {
+		if err := r.ParseForm(); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "parse form: " + err.Error()})
+			return
+		}
+		for k, vs := range r.PostForm {
+			if len(vs) > 0 {
+				fields[k] = vs[0]
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"contentType": ct,
+		"fields":      fields,
+		"files":       files,
+		"fieldCount":  len(fields),
 	})
 }
 

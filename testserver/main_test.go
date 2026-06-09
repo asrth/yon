@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"image"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -434,6 +435,95 @@ func TestTextBM_StaysTextNotImage(t *testing.T) {
 	}
 	if !bytes.HasPrefix(body, []byte("BM")) {
 		t.Errorf("body should start with the BMP-signature prefix \"BM\"; got %q", body[:min(8, len(body))])
+	}
+}
+
+// TestFormEcho_URLEncoded posts an application/x-www-form-urlencoded body and
+// checks the fields are echoed and the files slice is empty.
+func TestFormEcho_URLEncoded(t *testing.T) {
+	srv, c := newTestServer(t)
+	form := url.Values{}
+	form.Set("name", "yon")
+	form.Set("lang", "go")
+
+	resp, err := c.Post(srv.URL+"/form", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatalf("POST /form: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var m map[string]any
+	json.NewDecoder(resp.Body).Decode(&m)
+
+	fields, _ := m["fields"].(map[string]any)
+	if fields["name"] != "yon" || fields["lang"] != "go" {
+		t.Fatalf("fields not echoed: %v", fields)
+	}
+	files, _ := m["files"].([]any)
+	if len(files) != 0 {
+		t.Fatalf("files = %v, want empty", files)
+	}
+	if cnt, _ := m["fieldCount"].(float64); int(cnt) != 2 {
+		t.Fatalf("fieldCount = %v, want 2", m["fieldCount"])
+	}
+}
+
+// TestFormEcho_Multipart posts a multipart/form-data body with two text fields
+// and one file part, and checks the text fields are echoed and the files slice
+// reports the file's field name, filename, and size.
+func TestFormEcho_Multipart(t *testing.T) {
+	srv, c := newTestServer(t)
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("title", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.WriteField("tag", "http"); err != nil {
+		t.Fatal(err)
+	}
+	fw, err := mw.CreateFormFile("upload", "hello.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const fileContent = "throw a request, catch a response"
+	if _, err := io.WriteString(fw, fileContent); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := c.Post(srv.URL+"/form", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("POST /form: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var m map[string]any
+	json.NewDecoder(resp.Body).Decode(&m)
+
+	fields, _ := m["fields"].(map[string]any)
+	if fields["title"] != "hello" || fields["tag"] != "http" {
+		t.Fatalf("text fields not echoed: %v", fields)
+	}
+	files, _ := m["files"].([]any)
+	if len(files) != 1 {
+		t.Fatalf("files = %v, want one entry", files)
+	}
+	f, _ := files[0].(map[string]any)
+	if f["field"] != "upload" {
+		t.Errorf("file field = %v, want upload", f["field"])
+	}
+	if f["filename"] != "hello.txt" {
+		t.Errorf("file filename = %v, want hello.txt", f["filename"])
+	}
+	if size, _ := f["size"].(float64); int(size) != len(fileContent) {
+		t.Errorf("file size = %v, want %d", f["size"], len(fileContent))
 	}
 }
 

@@ -1,8 +1,13 @@
 package yonner
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"mime/multipart"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ultramcu/yon/internal/model"
@@ -17,27 +22,64 @@ import (
 //
 // A nil reader means "no body" (BodyNone, or an empty Content for the text-ish
 // types) so http.NewRequest sends no body at all.
-//
-// LANE A (engine) owns this file: implement the BodyForm and BodyMultipart
-// branches (currently stubbed). The none/json/text/xml branches must keep their
-// exact current behaviour.
 func buildBodyReader(b model.Body, resolve func(string) string) (io.Reader, string, error) {
 	switch b.Type {
 	case model.BodyNone, "":
 		return nil, "", nil
 
 	case model.BodyForm:
-		// TODO(LANE A): build application/x-www-form-urlencoded from the enabled
-		// Body.Fields (url.Values, resolving key+value), and return the encoded
-		// reader with Content-Type "application/x-www-form-urlencoded".
-		return nil, "", fmt.Errorf("yonner: form body not yet implemented")
+		// application/x-www-form-urlencoded: build from the enabled Fields in
+		// order (Yon preserves field order, unlike url.Values.Encode which
+		// sorts). IsFile/Filename are ignored here.
+		var pairs []string
+		for _, f := range b.Fields {
+			if !f.Enabled || f.Key == "" {
+				continue
+			}
+			pairs = append(pairs,
+				url.QueryEscape(resolve(f.Key))+"="+url.QueryEscape(resolve(f.Value)))
+		}
+		return strings.NewReader(strings.Join(pairs, "&")), "application/x-www-form-urlencoded", nil
 
 	case model.BodyMultipart:
-		// TODO(LANE A): build multipart/form-data from the enabled Body.Fields —
-		// WriteField for text parts, a file part (read from the resolved Value
-		// path; Filename or its basename) for IsFile fields — and return the
-		// buffer reader with the writer's FormDataContentType() (boundary included).
-		return nil, "", fmt.Errorf("yonner: multipart body not yet implemented")
+		// multipart/form-data: text parts via WriteField, file parts read from
+		// the resolved Value path. FormDataContentType() carries the boundary.
+		var buf bytes.Buffer
+		w := multipart.NewWriter(&buf)
+		for _, f := range b.Fields {
+			if !f.Enabled || f.Key == "" {
+				continue
+			}
+			if !f.IsFile {
+				if err := w.WriteField(resolve(f.Key), resolve(f.Value)); err != nil {
+					return nil, "", err
+				}
+				continue
+			}
+			path := resolve(f.Value)
+			file, err := os.Open(path)
+			if err != nil {
+				return nil, "", fmt.Errorf("yonner: multipart file %q: %w", path, err)
+			}
+			filename := resolve(f.Filename)
+			if filename == "" {
+				filename = filepath.Base(path)
+			}
+			part, err := w.CreateFormFile(resolve(f.Key), filename)
+			if err != nil {
+				file.Close()
+				return nil, "", err
+			}
+			if _, err := io.Copy(part, file); err != nil {
+				file.Close()
+				return nil, "", err
+			}
+			file.Close()
+		}
+		if err := w.Close(); err != nil {
+			return nil, "", err
+		}
+		return bytes.NewReader(buf.Bytes()), w.FormDataContentType(), nil
 
 	default: // BodyJSON, BodyXML, BodyText
 		if b.Content == "" {
